@@ -1,0 +1,15 @@
+package storage
+
+import (
+	"cncamp/pkg/third_party/nightingale/pkg/ormx"
+	"gorm.io/gorm"
+)
+
+func New(cfg ormx.DBConfig) (*gorm.DB, error) {
+	db, err := ormx.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
