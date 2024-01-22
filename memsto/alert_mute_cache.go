@@ -5,8 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/dumper"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+
 	"github.com/pkg/errors"
 	"github.com/toolkits/pkg/logger"
 )
@@ -107,18 +109,20 @@ func (amc *AlertMuteCacheType) syncAlertMutes() error {
 
 	stat, err := models.AlertMuteStatistics(amc.ctx)
 	if err != nil {
+		dumper.PutSyncRecord("alert_mutes", start.Unix(), -1, -1, "failed to query statistics: "+err.Error())
 		return errors.WithMessage(err, "failed to exec AlertMuteStatistics")
 	}
 
 	if !amc.StatChanged(stat.Total, stat.LastUpdated) {
 		amc.stats.GaugeCronDuration.WithLabelValues("sync_alert_mutes").Set(0)
 		amc.stats.GaugeSyncNumber.WithLabelValues("sync_alert_mutes").Set(0)
-		logger.Debug("alert mutes not changed")
+		dumper.PutSyncRecord("alert_mutes", start.Unix(), -1, -1, "not changed")
 		return nil
 	}
 
 	lst, err := models.AlertMuteGetsAll(amc.ctx)
 	if err != nil {
+		dumper.PutSyncRecord("alert_mutes", start.Unix(), -1, -1, "failed to query records: "+err.Error())
 		return errors.WithMessage(err, "failed to exec AlertMuteGetsByCluster")
 	}
 
@@ -139,6 +143,7 @@ func (amc *AlertMuteCacheType) syncAlertMutes() error {
 	amc.stats.GaugeCronDuration.WithLabelValues("sync_alert_mutes").Set(float64(ms))
 	amc.stats.GaugeSyncNumber.WithLabelValues("sync_alert_mutes").Set(float64(len(lst)))
 	logger.Infof("timer: sync mutes done, cost: %dms, number: %d", ms, len(lst))
+	dumper.PutSyncRecord("alert_mutes", start.Unix(), ms, len(lst), "success")
 
 	return nil
 }

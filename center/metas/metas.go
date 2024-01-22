@@ -5,8 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/storage"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/storage"
+
 	"github.com/toolkits/pkg/logger"
 )
 

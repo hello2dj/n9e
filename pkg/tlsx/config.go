@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"cncamp/pkg/third_party/nightingale/pkg/choice"
+	"github.com/ccfos/nightingale/v6/pkg/choice"
 )
 
 // ClientConfig represents the standard client TLS config.

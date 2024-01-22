@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/alert/astats"
-	"cncamp/pkg/third_party/nightingale/alert/naming"
-	"cncamp/pkg/third_party/nightingale/alert/process"
-	"cncamp/pkg/third_party/nightingale/memsto"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/prom"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/alert/astats"
+	"github.com/ccfos/nightingale/v6/alert/naming"
+	"github.com/ccfos/nightingale/v6/alert/process"
+	"github.com/ccfos/nightingale/v6/memsto"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/prom"
+	"github.com/ccfos/nightingale/v6/tdengine"
+
 	"github.com/toolkits/pkg/logger"
 )
 
 type Scheduler struct {
-	isCenter bool
 	// key: hash
 	alertRules map[string]*AlertRuleWorker
 
@@ -30,7 +31,8 @@ type Scheduler struct {
 	alertMuteCache  *memsto.AlertMuteCacheType
 	datasourceCache *memsto.DatasourceCacheType
 
-	promClients *prom.PromClientMap
+	promClient      *prom.PromClientMap
+	tdengineClients *tdengine.TdengineClientMap
 
 	naming *naming.Naming
 
@@ -38,11 +40,10 @@ type Scheduler struct {
 	stats *astats.Stats
 }
 
-func NewScheduler(isCenter bool, aconf aconf.Alert, externalProcessors *process.ExternalProcessorsType, arc *memsto.AlertRuleCacheType, targetCache *memsto.TargetCacheType,
-	busiGroupCache *memsto.BusiGroupCacheType, alertMuteCache *memsto.AlertMuteCacheType, datasourceCache *memsto.DatasourceCacheType, promClients *prom.PromClientMap, naming *naming.Naming,
-	ctx *ctx.Context, stats *astats.Stats) *Scheduler {
+func NewScheduler(aconf aconf.Alert, externalProcessors *process.ExternalProcessorsType, arc *memsto.AlertRuleCacheType, targetCache *memsto.TargetCacheType,
+	busiGroupCache *memsto.BusiGroupCacheType, alertMuteCache *memsto.AlertMuteCacheType, datasourceCache *memsto.DatasourceCacheType,
+	promClients *prom.PromClientMap, tdengineClients *tdengine.TdengineClientMap, naming *naming.Naming, ctx *ctx.Context, stats *astats.Stats) *Scheduler {
 	scheduler := &Scheduler{
-		isCenter:   isCenter,
 		aconf:      aconf,
 		alertRules: make(map[string]*AlertRuleWorker),
 
@@ -54,8 +55,9 @@ func NewScheduler(isCenter bool, aconf aconf.Alert, externalProcessors *process.
 		alertMuteCache:  alertMuteCache,
 		datasourceCache: datasourceCache,
 
-		promClients: promClients,
-		naming:      naming,
+		promClient:      promClients,
+		tdengineClients: tdengineClients,
+		naming:          naming,
 
 		ctx:   ctx,
 		stats: stats,
@@ -87,8 +89,11 @@ func (s *Scheduler) syncAlertRules() {
 		if rule == nil {
 			continue
 		}
-		if rule.IsPrometheusRule() {
-			datasourceIds := s.promClients.Hit(rule.DatasourceIdsJson)
+
+		ruleType := rule.GetRuleType()
+		if rule.IsPrometheusRule() || rule.IsLokiRule() || rule.IsTdengineRule() {
+			datasourceIds := s.promClient.Hit(rule.DatasourceIdsJson)
+			datasourceIds = append(datasourceIds, s.tdengineClients.Hit(rule.DatasourceIdsJson)...)
 			for _, dsId := range datasourceIds {
 				if !naming.DatasourceHashRing.IsHit(dsId, fmt.Sprintf("%d", rule.Id), s.aconf.Heartbeat.Endpoint) {
 					continue
@@ -99,22 +104,27 @@ func (s *Scheduler) syncAlertRules() {
 					continue
 				}
 
+				if ds.PluginType != ruleType {
+					logger.Debugf("datasource %d category is %s not %s", dsId, ds.PluginType, ruleType)
+					continue
+				}
+
 				if ds.Status != "enabled" {
 					logger.Debugf("datasource %d status is %s", dsId, ds.Status)
 					continue
 				}
-				processor := process.NewProcessor(rule, dsId, s.alertRuleCache, s.targetCache, s.busiGroupCache, s.alertMuteCache, s.datasourceCache, s.promClients, s.ctx, s.stats)
+				processor := process.NewProcessor(rule, dsId, s.alertRuleCache, s.targetCache, s.busiGroupCache, s.alertMuteCache, s.datasourceCache, s.ctx, s.stats)
 
-				alertRule := NewAlertRuleWorker(rule, dsId, processor, s.promClients, s.ctx)
+				alertRule := NewAlertRuleWorker(rule, dsId, processor, s.promClient, s.tdengineClients, s.ctx)
 				alertRuleWorkers[alertRule.Hash()] = alertRule
 			}
-		} else if rule.IsHostRule() && s.isCenter {
+		} else if rule.IsHostRule() && s.ctx.IsCenter {
 			// all host rule will be processed by center instance
 			if !naming.DatasourceHashRing.IsHit(naming.HostDatasource, fmt.Sprintf("%d", rule.Id), s.aconf.Heartbeat.Endpoint) {
 				continue
 			}
-			processor := process.NewProcessor(rule, 0, s.alertRuleCache, s.targetCache, s.busiGroupCache, s.alertMuteCache, s.datasourceCache, s.promClients, s.ctx, s.stats)
-			alertRule := NewAlertRuleWorker(rule, 0, processor, s.promClients, s.ctx)
+			processor := process.NewProcessor(rule, 0, s.alertRuleCache, s.targetCache, s.busiGroupCache, s.alertMuteCache, s.datasourceCache, s.ctx, s.stats)
+			alertRule := NewAlertRuleWorker(rule, 0, processor, s.promClient, s.tdengineClients, s.ctx)
 			alertRuleWorkers[alertRule.Hash()] = alertRule
 		} else {
 			// 如果 rule 不是通过 prometheus engine 来告警的，则创建为 externalRule
@@ -130,7 +140,7 @@ func (s *Scheduler) syncAlertRules() {
 					logger.Debugf("datasource %d status is %s", dsId, ds.Status)
 					continue
 				}
-				processor := process.NewProcessor(rule, dsId, s.alertRuleCache, s.targetCache, s.busiGroupCache, s.alertMuteCache, s.datasourceCache, s.promClients, s.ctx, s.stats)
+				processor := process.NewProcessor(rule, dsId, s.alertRuleCache, s.targetCache, s.busiGroupCache, s.alertMuteCache, s.datasourceCache, s.ctx, s.stats)
 				externalRuleWorkers[processor.Key()] = processor
 			}
 		}

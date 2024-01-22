@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
 	"github.com/toolkits/pkg/slice"
 )
 
@@ -24,6 +24,10 @@ type AlertAggrView struct {
 
 func (v *AlertAggrView) TableName() string {
 	return "alert_aggr_view"
+}
+
+func (v *AlertAggrView) DB2FE() error {
+	return nil
 }
 
 func (v *AlertAggrView) Verify() error {
@@ -83,19 +87,11 @@ func (v *AlertAggrView) Add(ctx *ctx.Context) error {
 	return Insert(ctx, v)
 }
 
-func (v *AlertAggrView) Update(ctx *ctx.Context, name, rule string, cate int, createBy int64) error {
+func (v *AlertAggrView) Update(ctx *ctx.Context) error {
 	if err := v.Verify(); err != nil {
 		return err
 	}
-
 	v.UpdateAt = time.Now().Unix()
-	v.Name = name
-	v.Rule = rule
-	v.Cate = cate
-
-	if v.CreateBy == 0 {
-		v.CreateBy = createBy
-	}
 
 	return DB(ctx).Model(v).Select("name", "rule", "cate", "update_at", "create_by").Updates(v).Error
 }

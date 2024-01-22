@@ -1,18 +1,22 @@
 package models
 
 import (
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
 	"github.com/pkg/errors"
 )
 
 type Role struct {
 	Id   int64  `json:"id" gorm:"primaryKey"`
-	Name string `json:"name" gorm:"uniqueIndex:role_name"`
+	Name string `json:"name"`
 	Note string `json:"note"`
 }
 
 func (Role) TableName() string {
 	return "role"
+}
+
+func (r *Role) DB2FE() error {
+	return nil
 }
 
 func RoleGets(ctx *ctx.Context, where string, args ...interface{}) ([]Role, error) {

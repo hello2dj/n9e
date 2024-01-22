@@ -3,7 +3,8 @@ package router
 import (
 	"net/http"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 	"github.com/toolkits/pkg/logger"
@@ -119,6 +120,11 @@ func (rt *Router) busiGroupGets(c *gin.Context) {
 		lst = []models.BusiGroup{}
 	}
 
+	ginx.NewRender(c).Data(lst, err)
+}
+
+func (rt *Router) busiGroupGetsByService(c *gin.Context) {
+	lst, err := models.BusiGroupGetAll(rt.Ctx)
 	ginx.NewRender(c).Data(lst, err)
 }
 

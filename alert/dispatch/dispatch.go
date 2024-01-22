@@ -8,12 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/alert/common"
-	"cncamp/pkg/third_party/nightingale/alert/sender"
-	"cncamp/pkg/third_party/nightingale/memsto"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/alert/astats"
+	"github.com/ccfos/nightingale/v6/alert/common"
+	"github.com/ccfos/nightingale/v6/alert/sender"
+	"github.com/ccfos/nightingale/v6/memsto"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+
 	"github.com/toolkits/pkg/logger"
 )
 
@@ -27,10 +29,13 @@ type Dispatch struct {
 
 	alerting aconf.Alerting
 
-	senders map[string]sender.Sender
-	tpls    map[string]*template.Template
+	Senders          map[string]sender.Sender
+	tpls             map[string]*template.Template
+	ExtraSenders     map[string]sender.Sender
+	BeforeSenderHook func(*models.AlertCurEvent) bool
 
-	ctx *ctx.Context
+	ctx    *ctx.Context
+	astats *astats.Stats
 
 	RwLock sync.RWMutex
 }
@@ -38,7 +43,7 @@ type Dispatch struct {
 // 创建一个 Notify 实例
 func NewDispatch(alertRuleCache *memsto.AlertRuleCacheType, userCache *memsto.UserCacheType, userGroupCache *memsto.UserGroupCacheType,
 	alertSubscribeCache *memsto.AlertSubscribeCacheType, targetCache *memsto.TargetCacheType, notifyConfigCache *memsto.NotifyConfigCacheType,
-	alerting aconf.Alerting, ctx *ctx.Context) *Dispatch {
+	alerting aconf.Alerting, ctx *ctx.Context, astats *astats.Stats) *Dispatch {
 	notify := &Dispatch{
 		alertRuleCache:      alertRuleCache,
 		userCache:           userCache,
@@ -49,10 +54,13 @@ func NewDispatch(alertRuleCache *memsto.AlertRuleCacheType, userCache *memsto.Us
 
 		alerting: alerting,
 
-		senders: make(map[string]sender.Sender),
-		tpls:    make(map[string]*template.Template),
+		Senders:          make(map[string]sender.Sender),
+		tpls:             make(map[string]*template.Template),
+		ExtraSenders:     make(map[string]sender.Sender),
+		BeforeSenderHook: func(*models.AlertCurEvent) bool { return true },
 
-		ctx: ctx,
+		ctx:    ctx,
+		astats: astats,
 	}
 	return notify
 }
@@ -60,7 +68,7 @@ func NewDispatch(alertRuleCache *memsto.AlertRuleCacheType, userCache *memsto.Us
 func (e *Dispatch) ReloadTpls() error {
 	err := e.relaodTpls()
 	if err != nil {
-		logger.Error("failed to reload tpls: %v", err)
+		logger.Errorf("failed to reload tpls: %v", err)
 	}
 
 	duration := time.Duration(9000) * time.Millisecond
@@ -80,17 +88,24 @@ func (e *Dispatch) relaodTpls() error {
 	smtp := e.notifyConfigCache.GetSMTP()
 
 	senders := map[string]sender.Sender{
-		models.Email:    sender.NewSender(models.Email, tmpTpls, smtp),
-		models.Dingtalk: sender.NewSender(models.Dingtalk, tmpTpls, smtp),
-		models.Wecom:    sender.NewSender(models.Wecom, tmpTpls, smtp),
-		models.Feishu:   sender.NewSender(models.Feishu, tmpTpls, smtp),
-		models.Mm:       sender.NewSender(models.Mm, tmpTpls, smtp),
-		models.Telegram: sender.NewSender(models.Telegram, tmpTpls, smtp),
+		models.Email:      sender.NewSender(models.Email, tmpTpls, smtp),
+		models.Dingtalk:   sender.NewSender(models.Dingtalk, tmpTpls),
+		models.Wecom:      sender.NewSender(models.Wecom, tmpTpls),
+		models.Feishu:     sender.NewSender(models.Feishu, tmpTpls),
+		models.Mm:         sender.NewSender(models.Mm, tmpTpls),
+		models.Telegram:   sender.NewSender(models.Telegram, tmpTpls),
+		models.FeishuCard: sender.NewSender(models.FeishuCard, tmpTpls),
 	}
+
+	e.RwLock.RLock()
+	for channelName, extraSender := range e.ExtraSenders {
+		senders[channelName] = extraSender
+	}
+	e.RwLock.RUnlock()
 
 	e.RwLock.Lock()
 	e.tpls = tmpTpls
-	e.senders = senders
+	e.Senders = senders
 	e.RwLock.Unlock()
 	return nil
 }
@@ -131,7 +146,7 @@ func (e *Dispatch) HandleEventNotify(event *models.AlertCurEvent, isSubscribe bo
 	}
 
 	// 处理事件发送,这里用一个goroutine处理一个event的所有发送事件
-	go e.Send(rule, event, notifyTarget, isSubscribe)
+	go e.Send(rule, event, notifyTarget)
 
 	// 如果是不是订阅规则出现的event, 则需要处理订阅规则的event
 	if !isSubscribe {
@@ -158,45 +173,73 @@ func (e *Dispatch) handleSubs(event *models.AlertCurEvent) {
 
 // handleSub 处理订阅规则的event,注意这里event要使用值传递,因为后面会修改event的状态
 func (e *Dispatch) handleSub(sub *models.AlertSubscribe, event models.AlertCurEvent) {
-	if sub.IsDisabled() || !sub.MatchCluster(event.DatasourceId) {
+	if sub.IsDisabled() {
 		return
 	}
+
+	if !sub.MatchCluster(event.DatasourceId) {
+		return
+	}
+
+	if !sub.MatchProd(event.RuleProd) {
+		return
+	}
+
 	if !common.MatchTags(event.TagsMap, sub.ITags) {
+		return
+	}
+	// event BusiGroups filter
+	if !common.MatchGroupsName(event.GroupName, sub.IBusiGroups) {
 		return
 	}
 	if sub.ForDuration > (event.TriggerTime - event.FirstTriggerTime) {
 		return
 	}
+
+	if len(sub.SeveritiesJson) != 0 {
+		match := false
+		for _, s := range sub.SeveritiesJson {
+			if s == event.Severity || s == 0 {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return
+		}
+	}
+
 	sub.ModifyEvent(&event)
 	LogEvent(&event, "subscribe")
+
+	event.SubRuleId = sub.Id
 	e.HandleEventNotify(&event, true)
 }
 
-func (e *Dispatch) Send(rule *models.AlertRule, event *models.AlertCurEvent, notifyTarget *NotifyTarget, isSubscribe bool) {
-	for channel, uids := range notifyTarget.ToChannelUserMap() {
-		ctx := sender.BuildMessageContext(rule, event, uids, e.userCache)
-		e.RwLock.RLock()
-		s := e.senders[channel]
-		e.RwLock.RUnlock()
-		if s == nil {
-			logger.Debugf("no sender for channel: %s", channel)
-			continue
+func (e *Dispatch) Send(rule *models.AlertRule, event *models.AlertCurEvent, notifyTarget *NotifyTarget) {
+	needSend := e.BeforeSenderHook(event)
+	if needSend {
+		for channel, uids := range notifyTarget.ToChannelUserMap() {
+			msgCtx := sender.BuildMessageContext(rule, []*models.AlertCurEvent{event}, uids, e.userCache, e.astats)
+			e.RwLock.RLock()
+			s := e.Senders[channel]
+			e.RwLock.RUnlock()
+			if s == nil {
+				logger.Debugf("no sender for channel: %s", channel)
+				continue
+			}
+			s.Send(msgCtx)
 		}
-		logger.Debugf("send event: %s, channel: %s", event.Hash, channel)
-		for i := 0; i < len(ctx.Users); i++ {
-			logger.Debug("send event to user: ", ctx.Users[i])
-		}
-		s.Send(ctx)
 	}
 
 	// handle event callbacks
-	sender.SendCallbacks(e.ctx, notifyTarget.ToCallbackList(), event, e.targetCache, e.notifyConfigCache.GetIbex())
+	sender.SendCallbacks(e.ctx, notifyTarget.ToCallbackList(), event, e.targetCache, e.userCache, e.notifyConfigCache.GetIbex(), e.astats)
 
 	// handle global webhooks
-	sender.SendWebhooks(notifyTarget.ToWebhookList(), event)
+	sender.SendWebhooks(notifyTarget.ToWebhookList(), event, e.astats)
 
 	// handle plugin call
-	go sender.MayPluginNotify(e.genNoticeBytes(event), e.notifyConfigCache.GetNotifyScript())
+	go sender.MayPluginNotify(e.genNoticeBytes(event), e.notifyConfigCache.GetNotifyScript(), e.astats)
 }
 
 type Notice struct {

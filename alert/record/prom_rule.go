@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/prom"
-	"cncamp/pkg/third_party/nightingale/pushgw/writer"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/prom"
+	"github.com/ccfos/nightingale/v6/pushgw/writer"
+
 	"github.com/toolkits/pkg/logger"
 	"github.com/toolkits/pkg/str"
 )

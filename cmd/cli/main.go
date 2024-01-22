@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"cncamp/pkg/third_party/nightingale/cli"
-	"cncamp/pkg/third_party/nightingale/pkg/version"
+	"github.com/ccfos/nightingale/v6/cli"
+	"github.com/ccfos/nightingale/v6/pkg/version"
 )
 
 var (

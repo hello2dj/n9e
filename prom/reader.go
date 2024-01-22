@@ -1,26 +1,26 @@
 package prom
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/prom"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+	"github.com/ccfos/nightingale/v6/pkg/prom"
+
 	"github.com/prometheus/client_golang/api"
 	"github.com/toolkits/pkg/logger"
 )
 
-func NewPromClient(ctx *ctx.Context, heartbeat aconf.HeartbeatConfig) *PromClientMap {
+func NewPromClient(ctx *ctx.Context) *PromClientMap {
 	pc := &PromClientMap{
 		ReaderClients: make(map[int64]prom.API),
 		WriterClients: make(map[int64]prom.WriterType),
 		ctx:           ctx,
-		heartbeat:     heartbeat,
 	}
 	pc.InitReader()
 	return pc
@@ -36,16 +36,38 @@ func (pc *PromClientMap) InitReader() error {
 	return nil
 }
 
-type PromSetting struct {
-	WriterAddr string `json:"write_addr"`
-}
-
 func (pc *PromClientMap) loadFromDatabase() {
-	datasources, err := models.GetDatasourcesGetsBy(pc.ctx, models.PROMETHEUS, "", "", "")
-	if err != nil {
-		logger.Errorf("failed to get datasources, error: %v", err)
-		return
+	var datasources []*models.Datasource
+	var err error
+	if !pc.ctx.IsCenter {
+		datasources, err = poster.GetByUrls[[]*models.Datasource](pc.ctx, "/v1/n9e/datasources?typ="+models.PROMETHEUS)
+		if err != nil {
+			logger.Errorf("failed to get datasources, error: %v", err)
+			return
+		}
+		lokiDatasource, err := poster.GetByUrls[[]*models.Datasource](pc.ctx, "/v1/n9e/datasources?typ="+models.LOKI)
+		datasources = append(datasources, lokiDatasource...)
+		if err != nil {
+			logger.Errorf("failed to get datasources, error: %v", err)
+			return
+		}
+		for i := 0; i < len(datasources); i++ {
+			datasources[i].FE2DB()
+		}
+	} else {
+		datasources, err = models.GetDatasourcesGetsBy(pc.ctx, models.PROMETHEUS, "", "", "")
+		if err != nil {
+			logger.Errorf("failed to get datasources, error: %v", err)
+			return
+		}
+		lokiDatasource, err := models.GetDatasourcesGetsBy(pc.ctx, models.LOKI, "", "", "")
+		datasources = append(datasources, lokiDatasource...)
+		if err != nil {
+			logger.Errorf("failed to get datasources, error: %v", err)
+			return
+		}
 	}
+
 	newCluster := make(map[int64]struct{})
 	for _, ds := range datasources {
 		dsId := ds.Id
@@ -55,19 +77,20 @@ func (pc *PromClientMap) loadFromDatabase() {
 			header = append(header, v)
 		}
 
-		var promSetting PromSetting
-		if ds.Settings != "" {
-			err := json.Unmarshal([]byte(ds.Settings), &promSetting)
-			if err != nil {
-				logger.Errorf("failed to unmarshal prom settings, error: %v", err)
-				continue
+		var writeAddr string
+		var internalAddr string
+		for k, v := range ds.SettingsJson {
+			if strings.Contains(k, "write_addr") {
+				writeAddr = v.(string)
+			} else if strings.Contains(k, "internal_addr") && v.(string) != "" {
+				internalAddr = v.(string)
 			}
 		}
 
 		po := PromOption{
 			ClusterName:         ds.Name,
 			Url:                 ds.HTTPJson.Url,
-			WriteAddr:           promSetting.WriterAddr,
+			WriteAddr:           writeAddr,
 			BasicAuthUser:       ds.AuthJson.BasicAuthUser,
 			BasicAuthPass:       ds.AuthJson.BasicAuthPassword,
 			Timeout:             ds.HTTPJson.Timeout,
@@ -76,11 +99,21 @@ func (pc *PromClientMap) loadFromDatabase() {
 			Headers:             header,
 		}
 
+		if strings.HasPrefix(ds.HTTPJson.Url, "https") {
+			po.UseTLS = true
+			po.InsecureSkipVerify = ds.HTTPJson.TLS.SkipTlsVerify
+		}
+
+		if internalAddr != "" && !pc.ctx.IsCenter {
+			// internal addr is set, use internal addr when edge mode
+			po.Url = internalAddr
+		}
+
 		newCluster[dsId] = struct{}{}
 		if pc.IsNil(dsId) {
 			// first time
 			if err = pc.setClientFromPromOption(dsId, po); err != nil {
-				logger.Errorf("failed to setClientFromPromOption: %v", err)
+				logger.Errorf("failed to setClientFromPromOption po:%+v err:%v", po, err)
 				continue
 			}
 
@@ -112,11 +145,13 @@ func (pc *PromClientMap) loadFromDatabase() {
 }
 
 func (pc *PromClientMap) newReaderClientFromPromOption(po PromOption) (api.Client, error) {
+	tlsConfig, _ := po.TLSConfig()
+
 	return api.NewClient(api.Config{
 		Address: po.Url,
 		RoundTripper: &http.Transport{
-			// TLSClientConfig: tlsConfig,
-			Proxy: http.ProxyFromEnvironment,
+			TLSClientConfig: tlsConfig,
+			Proxy:           http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout: time.Duration(po.DialTimeout) * time.Millisecond,
 			}).DialContext,
@@ -127,11 +162,13 @@ func (pc *PromClientMap) newReaderClientFromPromOption(po PromOption) (api.Clien
 }
 
 func (pc *PromClientMap) newWriterClientFromPromOption(po PromOption) (api.Client, error) {
+	tlsConfig, _ := po.TLSConfig()
+
 	return api.NewClient(api.Config{
 		Address: po.WriteAddr,
 		RoundTripper: &http.Transport{
-			// TLSClientConfig: tlsConfig,
-			Proxy: http.ProxyFromEnvironment,
+			TLSClientConfig: tlsConfig,
+			Proxy:           http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout: time.Duration(po.DialTimeout) * time.Millisecond,
 			}).DialContext,

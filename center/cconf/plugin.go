@@ -7,16 +7,22 @@ var Plugins = []Plugin{
 		Type:     "prometheus",
 		TypeName: "Prometheus Like",
 	},
+	// {
+	// 	Id:       2,
+	// 	Category: "logging",
+	// 	Type:     "elasticsearch",
+	// 	TypeName: "Elasticsearch",
+	// },
 	{
 		Id:       2,
-		Category: "logging",
-		Type:     "elasticsearch",
-		TypeName: "Elasticsearch",
+		Category: "loki",
+		Type:     "loki",
+		TypeName: "Loki",
 	},
-	{
-		Id:       3,
-		Category: "logging",
-		Type:     "jaeger",
-		TypeName: "Jaeger",
-	},
+	// {
+	// 	Id:       4,
+	// 	Category: "timeseries",
+	// 	Type:     "tdengine",
+	// 	TypeName: "TDengine",
+	// },
 }

@@ -41,24 +41,17 @@ WriteTimeout = 40
 # http server idle timeout, unit: s
 IdleTimeout = 120
 
-[HTTP.Pushgw]
+[HTTP.ShowCaptcha]
+Enable = false 
+
+[HTTP.APIForAgent]
 Enable = true 
-# [HTTP.Pushgw.BasicAuth]
+# [HTTP.APIForAgent.BasicAuth]
 # user001 = "ccc26da7b9aba533cbb263a36c07dcc5"
 
-[HTTP.Alert]
+[HTTP.APIForService]
 Enable = true 
-[HTTP.Alert.BasicAuth]
-user001 = "ccc26da7b9aba533cbb263a36c07dcc5"
-
-[HTTP.Heartbeat]
-Enable = true 
-# [HTTP.Heartbeat.BasicAuth]
-# user001 = "ccc26da7b9aba533cbb263a36c07dcc5"
-
-[HTTP.Service]
-Enable = true 
-[HTTP.Service.BasicAuth]
+[HTTP.APIForService.BasicAuth]
 user001 = "ccc26da7b9aba533cbb263a36c07dcc5"
 
 [HTTP.JWTAuth]
@@ -77,8 +70,13 @@ Enable = false
 HeaderUserNameKey = "X-User-Name"
 DefaultRoles = ["Standard"]
 
+[HTTP.RSA]
+# open RSA
+OpenRSA = false
+
 [DB]
 # postgres: host=%s port=%s user=%s dbname=%s password=%s sslmode=%s
+# postgres: DSN="host=127.0.0.1 port=5432 user=root dbname=n9e_v6 password=1234 sslmode=disable"
 DSN="root:1234@tcp(127.0.0.1:3306)/n9e_v6?charset=utf8mb4&parseTime=True&loc=Local&allowNativePasswords=true"
 # enable debug mode or not
 Debug = false
@@ -141,12 +139,8 @@ LabelRewrite = true
 # __name__ = "xx"
 
 # [Pushgw.WriterOpt]
-# # Writer Options
-# QueueCount = 1000
 # QueueMaxSize = 1000000
 # QueuePopSize = 1000
-# # ident or metric
-# ShardingKey = "ident"
 
 [[Pushgw.Writers]] 
 # Url = "http://127.0.0.1:8480/insert/0/prometheus/api/v1/write"

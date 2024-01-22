@@ -3,7 +3,9 @@ package models
 import (
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+
 	"github.com/pkg/errors"
 	"github.com/toolkits/pkg/str"
 	"gorm.io/gorm"
@@ -24,6 +26,9 @@ func (ug *UserGroup) TableName() string {
 	return "user_group"
 }
 
+func (ug *UserGroup) DB2FE() error {
+	return nil
+}
 func (ug *UserGroup) Verify() error {
 	if str.Dangerous(ug.Name) {
 		return errors.New("Name has invalid characters")
@@ -111,6 +116,11 @@ func UserGroupGetByIds(ctx *ctx.Context, ids []int64) ([]UserGroup, error) {
 }
 
 func UserGroupGetAll(ctx *ctx.Context) ([]*UserGroup, error) {
+	if !ctx.IsCenter {
+		lst, err := poster.GetByUrls[[]*UserGroup](ctx, "/v1/n9e/user-groups")
+		return lst, err
+	}
+
 	var lst []*UserGroup
 	err := DB(ctx).Find(&lst).Error
 	return lst, err
@@ -139,6 +149,11 @@ func (ug *UserGroup) DelMembers(ctx *ctx.Context, userIds []int64) error {
 }
 
 func UserGroupStatistics(ctx *ctx.Context) (*Statistics, error) {
+	if !ctx.IsCenter {
+		s, err := poster.GetByUrls[*Statistics](ctx, "/v1/n9e/statistic?name=user_group")
+		return s, err
+	}
+
 	session := DB(ctx).Model(&UserGroup{}).Select("count(*) as total", "max(update_at) as last_updated")
 
 	var stats []*Statistics

@@ -1,6 +1,9 @@
 package models
 
-import "cncamp/pkg/third_party/nightingale/pkg/ctx"
+import (
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+)
 
 type TaskRecord struct {
 	Id           int64  `json:"id" gorm:"primaryKey"`
@@ -27,12 +30,17 @@ func (r *TaskRecord) TableName() string {
 
 // create task
 func (r *TaskRecord) Add(ctx *ctx.Context) error {
+	if !ctx.IsCenter {
+		err := poster.PostByUrls(ctx, "/v1/n9e/task-record-add", r)
+		return err
+	}
+
 	return Insert(ctx, r)
 }
 
 // list task, filter by group_id, create_by
-func TaskRecordTotal(ctx *ctx.Context, bgid, beginTime int64, createBy, query string) (int64, error) {
-	session := DB(ctx).Model(new(TaskRecord)).Where("create_at > ? and group_id = ?", beginTime, bgid)
+func TaskRecordTotal(ctx *ctx.Context, bgids []int64, beginTime int64, createBy, query string) (int64, error) {
+	session := DB(ctx).Model(new(TaskRecord)).Where("create_at > ? and group_id in (?)", beginTime, bgids)
 
 	if createBy != "" {
 		session = session.Where("create_by = ?", createBy)
@@ -45,8 +53,8 @@ func TaskRecordTotal(ctx *ctx.Context, bgid, beginTime int64, createBy, query st
 	return Count(session)
 }
 
-func TaskRecordGets(ctx *ctx.Context, bgid, beginTime int64, createBy, query string, limit, offset int) ([]*TaskRecord, error) {
-	session := DB(ctx).Where("create_at > ? and group_id = ?", beginTime, bgid).Order("create_at desc").Limit(limit).Offset(offset)
+func TaskRecordGets(ctx *ctx.Context, bgids []int64, beginTime int64, createBy, query string, limit, offset int) ([]*TaskRecord, error) {
+	session := DB(ctx).Where("create_at > ? and group_id in (?)", beginTime, bgids).Order("create_at desc").Limit(limit).Offset(offset)
 
 	if createBy != "" {
 		session = session.Where("create_by = ?", createBy)

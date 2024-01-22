@@ -5,21 +5,25 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+
 	"github.com/pkg/errors"
 	"gorm.io/gorm"
 )
 
 type Target struct {
-	Id       int64             `json:"id" gorm:"primaryKey"`
-	GroupId  int64             `json:"group_id"`
-	GroupObj *BusiGroup        `json:"group_obj" gorm:"-"`
-	Ident    string            `json:"ident"`
-	Note     string            `json:"note"`
-	Tags     string            `json:"-"`
-	TagsJSON []string          `json:"tags" gorm:"-"`
-	TagsMap  map[string]string `json:"-" gorm:"-"` // internal use, append tags to series
-	UpdateAt int64             `json:"update_at"`
+	Id           int64             `json:"id" gorm:"primaryKey"`
+	GroupId      int64             `json:"group_id"`
+	GroupObj     *BusiGroup        `json:"group_obj" gorm:"-"`
+	Ident        string            `json:"ident"`
+	Note         string            `json:"note"`
+	Tags         string            `json:"-"`
+	TagsJSON     []string          `json:"tags" gorm:"-"`
+	TagsMap      map[string]string `json:"tags_maps" gorm:"-"` // internal use, append tags to series
+	UpdateAt     int64             `json:"update_at"`
+	HostIp       string            `json:"host_ip"` //ipv4，do not needs range select
+	AgentVersion string            `json:"agent_version"`
 
 	UnixTime   int64   `json:"unixtime" gorm:"-"`
 	Offset     int64   `json:"offset" gorm:"-"`
@@ -34,6 +38,10 @@ type Target struct {
 
 func (t *Target) TableName() string {
 	return "target"
+}
+
+func (t *Target) DB2FE() error {
+	return nil
 }
 
 func (t *Target) FillGroup(ctx *ctx.Context, cache map[int64]*BusiGroup) error {
@@ -58,6 +66,11 @@ func (t *Target) FillGroup(ctx *ctx.Context, cache map[int64]*BusiGroup) error {
 }
 
 func TargetStatistics(ctx *ctx.Context) (*Statistics, error) {
+	if !ctx.IsCenter {
+		s, err := poster.GetByUrls[*Statistics](ctx, "/v1/n9e/statistic?name=target")
+		return s, err
+	}
+
 	var stats []*Statistics
 	err := DB(ctx).Model(&Target{}).Select("count(*) as total", "max(update_at) as last_updated").Find(&stats).Error
 	if err != nil {
@@ -74,15 +87,19 @@ func TargetDel(ctx *ctx.Context, idents []string) error {
 	return DB(ctx).Where("ident in ?", idents).Delete(new(Target)).Error
 }
 
-func buildTargetWhere(ctx *ctx.Context, bgid int64, dsIds []int64, query string) *gorm.DB {
+func buildTargetWhere(ctx *ctx.Context, bgids []int64, dsIds []int64, query string, downtime int64) *gorm.DB {
 	session := DB(ctx).Model(&Target{})
 
-	if bgid >= 0 {
-		session = session.Where("group_id=?", bgid)
+	if len(bgids) > 0 {
+		session = session.Where("group_id in (?)", bgids)
 	}
 
 	if len(dsIds) > 0 {
-		session = session.Where("datasource_id in ?", dsIds)
+		session = session.Where("datasource_id in (?)", dsIds)
+	}
+
+	if downtime > 0 {
+		session = session.Where("update_at < ?", time.Now().Unix()-downtime)
 	}
 
 	if query != "" {
@@ -100,13 +117,13 @@ func TargetTotalCount(ctx *ctx.Context) (int64, error) {
 	return Count(DB(ctx).Model(new(Target)))
 }
 
-func TargetTotal(ctx *ctx.Context, bgid int64, dsIds []int64, query string) (int64, error) {
-	return Count(buildTargetWhere(ctx, bgid, dsIds, query))
+func TargetTotal(ctx *ctx.Context, bgids []int64, dsIds []int64, query string, downtime int64) (int64, error) {
+	return Count(buildTargetWhere(ctx, bgids, dsIds, query, downtime))
 }
 
-func TargetGets(ctx *ctx.Context, bgid int64, dsIds []int64, query string, limit, offset int) ([]*Target, error) {
+func TargetGets(ctx *ctx.Context, bgids []int64, dsIds []int64, query string, downtime int64, limit, offset int) ([]*Target, error) {
 	var lst []*Target
-	err := buildTargetWhere(ctx, bgid, dsIds, query).Order("ident").Limit(limit).Offset(offset).Find(&lst).Error
+	err := buildTargetWhere(ctx, bgids, dsIds, query, downtime).Order("ident").Limit(limit).Offset(offset).Find(&lst).Error
 	if err == nil {
 		for i := 0; i < len(lst); i++ {
 			lst[i].TagsJSON = strings.Fields(lst[i].Tags)
@@ -116,7 +133,7 @@ func TargetGets(ctx *ctx.Context, bgid int64, dsIds []int64, query string, limit
 }
 
 // 根据 groupids, tags, hosts 查询 targets
-func TargetGetsByFilter(ctx *ctx.Context, query map[string]interface{}, limit, offset int) ([]*Target, error) {
+func TargetGetsByFilter(ctx *ctx.Context, query []map[string]interface{}, limit, offset int) ([]*Target, error) {
 	var lst []*Target
 	session := TargetFilterQueryBuild(ctx, query, limit, offset)
 	err := session.Order("ident").Find(&lst).Error
@@ -129,12 +146,12 @@ func TargetGetsByFilter(ctx *ctx.Context, query map[string]interface{}, limit, o
 	return lst, err
 }
 
-func TargetCountByFilter(ctx *ctx.Context, query map[string]interface{}) (int64, error) {
+func TargetCountByFilter(ctx *ctx.Context, query []map[string]interface{}) (int64, error) {
 	session := TargetFilterQueryBuild(ctx, query, 0, 0)
 	return Count(session)
 }
 
-func MissTargetGetsByFilter(ctx *ctx.Context, query map[string]interface{}, ts int64) ([]*Target, error) {
+func MissTargetGetsByFilter(ctx *ctx.Context, query []map[string]interface{}, ts int64) ([]*Target, error) {
 	var lst []*Target
 	session := TargetFilterQueryBuild(ctx, query, 0, 0)
 	session = session.Where("update_at < ?", ts)
@@ -143,16 +160,20 @@ func MissTargetGetsByFilter(ctx *ctx.Context, query map[string]interface{}, ts i
 	return lst, err
 }
 
-func MissTargetCountByFilter(ctx *ctx.Context, query map[string]interface{}, ts int64) (int64, error) {
+func MissTargetCountByFilter(ctx *ctx.Context, query []map[string]interface{}, ts int64) (int64, error) {
 	session := TargetFilterQueryBuild(ctx, query, 0, 0)
 	session = session.Where("update_at < ?", ts)
 	return Count(session)
 }
 
-func TargetFilterQueryBuild(ctx *ctx.Context, query map[string]interface{}, limit, offset int) *gorm.DB {
+func TargetFilterQueryBuild(ctx *ctx.Context, query []map[string]interface{}, limit, offset int) *gorm.DB {
 	session := DB(ctx).Model(&Target{})
-	for k, v := range query {
-		session = session.Where(k, v)
+	for _, q := range query {
+		tx := DB(ctx).Model(&Target{})
+		for k, v := range q {
+			tx = tx.Or(k, v)
+		}
+		session = session.Where(tx)
 	}
 
 	if limit > 0 {
@@ -163,8 +184,16 @@ func TargetFilterQueryBuild(ctx *ctx.Context, query map[string]interface{}, limi
 }
 
 func TargetGetsAll(ctx *ctx.Context) ([]*Target, error) {
+	if !ctx.IsCenter {
+		lst, err := poster.GetByUrls[[]*Target](ctx, "/v1/n9e/targets")
+		return lst, err
+	}
+
 	var lst []*Target
 	err := DB(ctx).Model(&Target{}).Find(&lst).Error
+	for i := 0; i < len(lst); i++ {
+		lst[i].FillTagsMap()
+	}
 	return lst, err
 }
 

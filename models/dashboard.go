@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
 	"github.com/pkg/errors"
 	"github.com/toolkits/pkg/str"
 	"gorm.io/gorm"

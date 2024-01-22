@@ -3,7 +3,7 @@ package models
 import (
 	"errors"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
 )
 
 type BoardPayload struct {

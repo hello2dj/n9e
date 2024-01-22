@@ -4,7 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 	"github.com/toolkits/pkg/logger"
@@ -26,6 +27,17 @@ func (rt *Router) userGroupGets(c *gin.Context) {
 	lst, err := me.UserGroups(rt.Ctx, limit, query)
 
 	ginx.NewRender(c).Data(lst, err)
+}
+
+func (rt *Router) userGroupGetsByService(c *gin.Context) {
+	lst, err := models.UserGroupGetAll(rt.Ctx)
+	ginx.NewRender(c).Data(lst, err)
+}
+
+// user group member get by service
+func (rt *Router) userGroupMemberGetsByService(c *gin.Context) {
+	members, err := models.UserGroupMemberGetAll(rt.Ctx)
+	ginx.NewRender(c).Data(members, err)
 }
 
 type userGroupForm struct {

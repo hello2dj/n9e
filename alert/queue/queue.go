@@ -3,7 +3,7 @@ package queue
 import (
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/astats"
+	"github.com/ccfos/nightingale/v6/alert/astats"
 	"github.com/toolkits/pkg/container/list"
 )
 

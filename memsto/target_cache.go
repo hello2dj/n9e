@@ -8,9 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/storage"
+	"github.com/ccfos/nightingale/v6/dumper"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/storage"
+
 	"github.com/pkg/errors"
 	"github.com/toolkits/pkg/logger"
 )
@@ -128,29 +130,34 @@ func (tc *TargetCacheType) syncTargets() error {
 
 	stat, err := models.TargetStatistics(tc.ctx)
 	if err != nil {
+		dumper.PutSyncRecord("targets", start.Unix(), -1, -1, "failed to query statistics: "+err.Error())
 		return errors.WithMessage(err, "failed to call TargetStatistics")
 	}
 
 	if !tc.StatChanged(stat.Total, stat.LastUpdated) {
 		tc.stats.GaugeCronDuration.WithLabelValues("sync_targets").Set(0)
 		tc.stats.GaugeSyncNumber.WithLabelValues("sync_targets").Set(0)
-		logger.Debug("targets not changed")
+		dumper.PutSyncRecord("targets", start.Unix(), -1, -1, "not changed")
 		return nil
 	}
 
 	lst, err := models.TargetGetsAll(tc.ctx)
 	if err != nil {
+		dumper.PutSyncRecord("targets", start.Unix(), -1, -1, "failed to query records: "+err.Error())
 		return errors.WithMessage(err, "failed to call TargetGetsAll")
 	}
 
-	metaMap := tc.GetHostMetas(lst)
-
 	m := make(map[string]*models.Target)
-	for i := 0; i < len(lst); i++ {
-		lst[i].FillTagsMap()
-		if meta, ok := metaMap[lst[i].Ident]; ok {
-			lst[i].FillMeta(meta)
+	if tc.ctx.IsCenter {
+		metaMap := tc.GetHostMetas(lst)
+		for i := 0; i < len(lst); i++ {
+			if meta, ok := metaMap[lst[i].Ident]; ok {
+				lst[i].FillMeta(meta)
+			}
 		}
+	}
+
+	for i := 0; i < len(lst); i++ {
 		m[lst[i].Ident] = lst[i]
 	}
 
@@ -160,6 +167,7 @@ func (tc *TargetCacheType) syncTargets() error {
 	tc.stats.GaugeCronDuration.WithLabelValues("sync_targets").Set(float64(ms))
 	tc.stats.GaugeSyncNumber.WithLabelValues("sync_targets").Set(float64(len(lst)))
 	logger.Infof("timer: sync targets done, cost: %dms, number: %d", ms, len(lst))
+	dumper.PutSyncRecord("targets", start.Unix(), ms, len(lst), "success")
 
 	return nil
 }
@@ -178,7 +186,8 @@ func (tc *TargetCacheType) GetHostMetas(targets []*models.Target) map[string]*mo
 		if num == 100 {
 			vals, err := storage.MGet(context.Background(), tc.redis, keys)
 			if err != nil {
-				return metaMap
+				logger.Errorf("failed to get host meta: %s", err)
+				continue
 			}
 			for _, value := range vals {
 				var meta models.HostMeta
@@ -201,6 +210,7 @@ func (tc *TargetCacheType) GetHostMetas(targets []*models.Target) map[string]*mo
 
 	vals, err := storage.MGet(context.Background(), tc.redis, keys)
 	if err != nil {
+		logger.Errorf("failed to get host meta: %s", err)
 		return metaMap
 	}
 	for _, value := range vals {

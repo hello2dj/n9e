@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
 	"github.com/toolkits/pkg/str"
 	"gorm.io/gorm"
 )
@@ -35,8 +37,12 @@ func (t *TaskTpl) TableName() string {
 	return "task_tpl"
 }
 
-func TaskTplTotal(ctx *ctx.Context, groupId int64, query string) (int64, error) {
-	session := DB(ctx).Model(&TaskTpl{}).Where("group_id = ?", groupId)
+func (t *TaskTpl) DB2FE() error {
+	return nil
+}
+
+func TaskTplTotal(ctx *ctx.Context, groupIds []int64, query string) (int64, error) {
+	session := DB(ctx).Model(&TaskTpl{}).Where("group_id in (?)", groupIds)
 	if query == "" {
 		return Count(session)
 	}
@@ -50,8 +56,8 @@ func TaskTplTotal(ctx *ctx.Context, groupId int64, query string) (int64, error) 
 	return Count(session)
 }
 
-func TaskTplGets(ctx *ctx.Context, groupId int64, query string, limit, offset int) ([]TaskTpl, error) {
-	session := DB(ctx).Where("group_id = ?", groupId).Order("title").Limit(limit).Offset(offset)
+func TaskTplGets(ctx *ctx.Context, groupIds []int64, query string, limit, offset int) ([]TaskTpl, error) {
+	session := DB(ctx).Where("group_id in (?)", groupIds).Order("title").Limit(limit).Offset(offset)
 
 	var tpls []TaskTpl
 	if query != "" {
@@ -70,6 +76,15 @@ func TaskTplGets(ctx *ctx.Context, groupId int64, query string, limit, offset in
 	}
 
 	return tpls, err
+}
+
+func TaskTplGetById(ctx *ctx.Context, id int64) (*TaskTpl, error) {
+	if !ctx.IsCenter {
+		tpl, err := poster.GetByUrls[*TaskTpl](ctx, "/v1/n9e/task-tpl/"+strconv.FormatInt(id, 10))
+		return tpl, err
+	}
+
+	return TaskTplGet(ctx, "id = ?", id)
 }
 
 func TaskTplGet(ctx *ctx.Context, where string, args ...interface{}) (*TaskTpl, error) {
@@ -125,6 +140,7 @@ func (t *TaskTpl) CleanFields() error {
 	if t.Script == "" {
 		return errors.New("arg(script) is required")
 	}
+	t.Script = strings.Replace(t.Script, "\r\n", "\n", -1)
 
 	if str.Dangerous(t.Args) {
 		return errors.New("arg(args) is dangerous")

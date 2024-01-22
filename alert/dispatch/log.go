@@ -1,7 +1,8 @@
 package dispatch
 
 import (
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/toolkits/pkg/logger"
 )
 

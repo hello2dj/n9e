@@ -1,6 +1,6 @@
 package models
 
-import "cncamp/pkg/third_party/nightingale/pkg/ctx"
+import "github.com/ccfos/nightingale/v6/pkg/ctx"
 
 type SsoConfig struct {
 	Id      int64  `json:"id"`
@@ -10,6 +10,10 @@ type SsoConfig struct {
 
 func (b *SsoConfig) TableName() string {
 	return "sso_config"
+}
+
+func (b *SsoConfig) DB2FE() error {
+	return nil
 }
 
 // get all sso_config

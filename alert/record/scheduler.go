@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/alert/astats"
-	"cncamp/pkg/third_party/nightingale/alert/naming"
-	"cncamp/pkg/third_party/nightingale/memsto"
-	"cncamp/pkg/third_party/nightingale/prom"
-	"cncamp/pkg/third_party/nightingale/pushgw/writer"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/alert/astats"
+	"github.com/ccfos/nightingale/v6/alert/naming"
+	"github.com/ccfos/nightingale/v6/memsto"
+	"github.com/ccfos/nightingale/v6/prom"
+	"github.com/ccfos/nightingale/v6/pushgw/writer"
 )
 
 type Scheduler struct {

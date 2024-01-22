@@ -6,9 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/ldapx"
-	"cncamp/pkg/third_party/nightingale/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ldapx"
+	"github.com/ccfos/nightingale/v6/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+
 	"github.com/pkg/errors"
 	"github.com/tidwall/gjson"
 	"github.com/toolkits/pkg/logger"
@@ -21,6 +23,7 @@ const (
 	Dingtalk     = "dingtalk"
 	Wecom        = "wecom"
 	Feishu       = "feishu"
+	FeishuCard   = "feishucard"
 	Mm           = "mm"
 	Telegram     = "telegram"
 	Email        = "email"
@@ -31,6 +34,10 @@ const (
 	FeishuKey   = "feishu_robot_token"
 	MmKey       = "mm_webhook_url"
 	TelegramKey = "telegram_robot_token"
+)
+
+var (
+	DefaultChannels = []string{Dingtalk, Wecom, Feishu, Mm, Telegram, Email, FeishuCard}
 )
 
 type User struct {
@@ -55,6 +62,10 @@ type User struct {
 
 func (u *User) TableName() string {
 	return "users"
+}
+
+func (u *User) DB2FE() error {
+	return nil
 }
 
 func (u *User) String() string {
@@ -284,7 +295,7 @@ func LdapLogin(ctx *ctx.Context, username, pass, roles string, ldap *ldapx.SsoCl
 		user.Email = sr.Entries[0].GetAttributeValue(attrs.Email)
 	}
 	if attrs.Phone != "" {
-		user.Phone = sr.Entries[0].GetAttributeValue(attrs.Phone)
+		user.Phone = strings.Replace(sr.Entries[0].GetAttributeValue(attrs.Phone), " ", "", -1)
 	}
 
 	if user.Roles == "" {
@@ -347,12 +358,18 @@ func UserGets(ctx *ctx.Context, query string, limit, offset int) ([]User, error)
 	for i := 0; i < len(users); i++ {
 		users[i].RolesLst = strings.Fields(users[i].Roles)
 		users[i].Admin = users[i].IsAdmin()
+		users[i].Password = ""
 	}
 
 	return users, nil
 }
 
 func UserGetAll(ctx *ctx.Context) ([]*User, error) {
+	if !ctx.IsCenter {
+		lst, err := poster.GetByUrls[[]*User](ctx, "/v1/n9e/users")
+		return lst, err
+	}
+
 	var lst []*User
 	err := DB(ctx).Find(&lst).Error
 	if err == nil {
@@ -429,6 +446,11 @@ func (u *User) CheckPerm(ctx *ctx.Context, operation string) (bool, error) {
 }
 
 func UserStatistics(ctx *ctx.Context) (*Statistics, error) {
+	if !ctx.IsCenter {
+		s, err := poster.GetByUrls[*Statistics](ctx, "/v1/n9e/statistic?name=user")
+		return s, err
+	}
+
 	session := DB(ctx).Model(&User{}).Select("count(*) as total", "max(update_at) as last_updated")
 
 	var stats []*Statistics
@@ -546,9 +568,10 @@ func (u *User) UserGroups(ctx *ctx.Context, limit int, query string) ([]UserGrou
 			return lst, err
 		}
 
+		var user *User
 		if len(lst) == 0 && len(query) > 0 {
 			// 隐藏功能，一般人不告诉，哈哈。query可能是给的用户名，所以上面的sql没有查到，当做user来查一下试试
-			user, err := UserGetByUsername(ctx, query)
+			user, err = UserGetByUsername(ctx, query)
 			if user == nil {
 				return lst, err
 			}
@@ -595,7 +618,7 @@ func (u *User) ExtractToken(key string) (string, bool) {
 	case Wecom:
 		ret := gjson.GetBytes(bs, WecomKey)
 		return ret.String(), ret.Exists()
-	case Feishu:
+	case Feishu, FeishuCard:
 		ret := gjson.GetBytes(bs, FeishuKey)
 		return ret.String(), ret.Exists()
 	case Mm:

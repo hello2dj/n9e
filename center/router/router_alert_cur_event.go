@@ -4,8 +4,10 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 )
@@ -127,6 +129,13 @@ func (rt *Router) alertCurEventsCardDetails(c *gin.Context) {
 	ginx.NewRender(c).Data(list, err)
 }
 
+// alertCurEventsGetByRid
+func (rt *Router) alertCurEventsGetByRid(c *gin.Context) {
+	rid := ginx.QueryInt64(c, "rid")
+	dsId := ginx.QueryInt64(c, "dsid")
+	ginx.NewRender(c).Data(models.AlertCurEventGetByRuleIdAndDsId(rt.Ctx, rid, dsId))
+}
+
 // 列表方式，拉取活跃告警
 func (rt *Router) alertCurEventsList(c *gin.Context) {
 	stime, etime := getTimeRange(c)
@@ -174,10 +183,19 @@ func (rt *Router) alertCurEventDel(c *gin.Context) {
 	ginx.BindJSON(c, &f)
 	f.Verify()
 
+	rt.checkCurEventBusiGroupRWPermission(c, f.Ids)
+
+	ginx.NewRender(c).Message(models.AlertCurEventDel(rt.Ctx, f.Ids))
+}
+
+func (rt *Router) checkCurEventBusiGroupRWPermission(c *gin.Context, ids []int64) {
 	set := make(map[int64]struct{})
 
-	for i := 0; i < len(f.Ids); i++ {
-		event, err := models.AlertCurEventGetById(rt.Ctx, f.Ids[i])
+	// event group id is 0, ignore perm check
+	set[0] = struct{}{}
+
+	for i := 0; i < len(ids); i++ {
+		event, err := models.AlertCurEventGetById(rt.Ctx, ids[i])
 		ginx.Dangerous(err)
 
 		if _, has := set[event.GroupId]; !has {
@@ -185,8 +203,6 @@ func (rt *Router) alertCurEventDel(c *gin.Context) {
 			set[event.GroupId] = struct{}{}
 		}
 	}
-
-	ginx.NewRender(c).Message(models.AlertCurEventDel(rt.Ctx, f.Ids))
 }
 
 func (rt *Router) alertCurEventGet(c *gin.Context) {
@@ -199,4 +215,9 @@ func (rt *Router) alertCurEventGet(c *gin.Context) {
 	}
 
 	ginx.NewRender(c).Data(event, nil)
+}
+
+func (rt *Router) alertCurEventsStatistics(c *gin.Context) {
+
+	ginx.NewRender(c).Data(models.AlertCurEventStatistics(rt.Ctx, time.Now()), nil)
 }

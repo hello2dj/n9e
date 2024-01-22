@@ -6,26 +6,34 @@ import (
 	"os"
 	"strings"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/center/cconf"
-	"cncamp/pkg/third_party/nightingale/pkg/cfg"
-	"cncamp/pkg/third_party/nightingale/pkg/httpx"
-	"cncamp/pkg/third_party/nightingale/pkg/logx"
-	"cncamp/pkg/third_party/nightingale/pkg/ormx"
-	"cncamp/pkg/third_party/nightingale/pushgw/pconf"
-	"cncamp/pkg/third_party/nightingale/storage"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/center/cconf"
+	"github.com/ccfos/nightingale/v6/pkg/cfg"
+	"github.com/ccfos/nightingale/v6/pkg/httpx"
+	"github.com/ccfos/nightingale/v6/pkg/logx"
+	"github.com/ccfos/nightingale/v6/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/pushgw/pconf"
+	"github.com/ccfos/nightingale/v6/storage"
 )
 
 type ConfigType struct {
-	Global GlobalConfig
-	Log    logx.Config
-	HTTP   httpx.Config
-	DB     ormx.DBConfig
-	Redis  storage.RedisConfig
+	Global    GlobalConfig
+	Log       logx.Config
+	HTTP      httpx.Config
+	DB        ormx.DBConfig
+	Redis     storage.RedisConfig
+	CenterApi CenterApi
 
 	Pushgw pconf.Pushgw
 	Alert  aconf.Alert
 	Center cconf.Center
+}
+
+type CenterApi struct {
+	Addrs         []string
+	BasicAuthUser string
+	BasicAuthPass string
+	Timeout       int64
 }
 
 type GlobalConfig struct {
@@ -40,7 +48,7 @@ func InitConfig(configDir, cryptoKey string) (*ConfigType, error) {
 	}
 
 	config.Pushgw.PreCheck()
-	config.Alert.PreCheck()
+	config.Alert.PreCheck(configDir)
 	config.Center.PreCheck()
 
 	err := decryptConfig(config, cryptoKey)

@@ -1,7 +1,7 @@
 package models
 
 import (
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
 )
 
 type BuiltinCate struct {

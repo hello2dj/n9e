@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"strings"
 
-	"cncamp/pkg/third_party/nightingale/pkg/prompb"
 	"github.com/gin-gonic/gin"
 	easyjson "github.com/mailru/easyjson"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/prompb"
 )
 
 //easyjson:json
@@ -59,7 +59,7 @@ func (m *DatadogMetric) ToProm() (*prompb.TimeSeries, string, error) {
 		return nil, "", fmt.Errorf("invalid metric name: %s", m.Metric)
 	}
 
-	pt.Labels = append(pt.Labels, &prompb.Label{
+	pt.Labels = append(pt.Labels, prompb.Label{
 		Name:  model.MetricNameLabel,
 		Value: m.Metric,
 	})
@@ -77,7 +77,7 @@ func (m *DatadogMetric) ToProm() (*prompb.TimeSeries, string, error) {
 
 		if key == "ident" {
 			identInTag = arr[1]
-			pt.Labels = append(pt.Labels, &prompb.Label{
+			pt.Labels = append(pt.Labels, prompb.Label{
 				Name:  key,
 				Value: arr[1],
 			})
@@ -101,7 +101,7 @@ func (m *DatadogMetric) ToProm() (*prompb.TimeSeries, string, error) {
 			return nil, "", fmt.Errorf("invalid tag name: %s", key)
 		}
 
-		pt.Labels = append(pt.Labels, &prompb.Label{
+		pt.Labels = append(pt.Labels, prompb.Label{
 			Name:  key,
 			Value: arr[1],
 		})
@@ -114,12 +114,12 @@ func (m *DatadogMetric) ToProm() (*prompb.TimeSeries, string, error) {
 
 	if hostInTag != "" {
 		if identInTag != "" {
-			pt.Labels = append(pt.Labels, &prompb.Label{
+			pt.Labels = append(pt.Labels, prompb.Label{
 				Name:  "host",
 				Value: hostInTag,
 			})
 		} else {
-			pt.Labels = append(pt.Labels, &prompb.Label{
+			pt.Labels = append(pt.Labels, prompb.Label{
 				Name:  "ident",
 				Value: hostInTag,
 			})
@@ -186,9 +186,9 @@ func (r *Router) datadogSeries(c *gin.Context) {
 		apiKey = ""
 	}
 
-	if len(r.HTTP.Pushgw.BasicAuth) > 0 {
+	if len(r.HTTP.APIForAgent.BasicAuth) > 0 {
 		ok := false
-		for _, v := range r.HTTP.Pushgw.BasicAuth {
+		for _, v := range r.HTTP.APIForAgent.BasicAuth {
 			if apiKey == v {
 				ok = true
 				break
@@ -256,16 +256,10 @@ func (r *Router) datadogSeries(c *gin.Context) {
 			}
 		}
 
-		r.debugSample(c.Request.RemoteAddr, pt)
-
-		if r.Pushgw.WriterOpt.ShardingKey == "ident" {
-			if ident == "" {
-				r.Writers.PushSample("-", pt)
-			} else {
-				r.Writers.PushSample(ident, pt)
-			}
+		if ident != "" {
+			r.ForwardByIdent(c.ClientIP(), ident, pt)
 		} else {
-			r.Writers.PushSample(item.Metric, pt)
+			r.ForwardByMetric(c.ClientIP(), item.Metric, pt)
 		}
 
 		succ++

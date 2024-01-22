@@ -1,7 +1,7 @@
 package models
 
 import (
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
 	"github.com/toolkits/pkg/slice"
 )
 
@@ -12,6 +12,10 @@ type RoleOperation struct {
 
 func (RoleOperation) TableName() string {
 	return "role_operation"
+}
+
+func (r *RoleOperation) DB2FE() error {
+	return nil
 }
 
 func RoleHasOperation(ctx *ctx.Context, roles []string, operation string) (bool, error) {

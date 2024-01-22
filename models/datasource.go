@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
 	"github.com/pkg/errors"
 	"github.com/toolkits/pkg/logger"
 	"github.com/toolkits/pkg/str"
@@ -32,6 +33,7 @@ type Datasource struct {
 	UpdatedAt      int64                  `json:"updated_at"`
 	CreatedBy      string                 `json:"created_by"`
 	UpdatedBy      string                 `json:"updated_by"`
+	IsDefault      bool                   `json:"is_default"`
 	Transport      *http.Transport        `json:"-" gorm:"-"`
 }
 
@@ -48,6 +50,21 @@ type HTTP struct {
 	MaxIdleConnsPerHost int               `json:"max_idle_conns_per_host"`
 	Url                 string            `json:"url"`
 	Headers             map[string]string `json:"headers"`
+}
+
+func (h HTTP) IsLoki() bool {
+	if strings.Contains(h.Url, "loki") {
+		return true
+	}
+
+	for k := range h.Headers {
+		tmp := strings.ToLower(k)
+		if strings.Contains(tmp, "loki") {
+			return true
+		}
+	}
+
+	return false
 }
 
 type TLS struct {
@@ -112,6 +129,17 @@ func (ds *Datasource) Get(ctx *ctx.Context) error {
 }
 
 func GetDatasources(ctx *ctx.Context) ([]Datasource, error) {
+	if !ctx.IsCenter {
+		lst, err := poster.GetByUrls[[]Datasource](ctx, "/v1/n9e/datasources")
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i < len(lst); i++ {
+			lst[i].FE2DB()
+		}
+		return lst, nil
+	}
+
 	var dss []Datasource
 	err := DB(ctx).Find(&dss).Error
 
@@ -123,6 +151,11 @@ func GetDatasources(ctx *ctx.Context) ([]Datasource, error) {
 }
 
 func GetDatasourceIdsByEngineName(ctx *ctx.Context, engineName string) ([]int64, error) {
+	if !ctx.IsCenter {
+		lst, err := poster.GetByUrls[[]int64](ctx, "/v1/n9e/datasource-ids?name="+engineName)
+		return lst, err
+	}
+
 	var dss []Datasource
 	var ids []int64
 	err := DB(ctx).Where("cluster_name = ?", engineName).Find(&dss).Error
@@ -136,6 +169,15 @@ func GetDatasourceIdsByEngineName(ctx *ctx.Context, engineName string) ([]int64,
 	return ids, err
 }
 
+func GetDatasourcesCountByName(ctx *ctx.Context, name string) (int64, error) {
+	session := DB(ctx).Model(&Datasource{})
+	if name != "" {
+		session = session.Where("name = ?", name)
+	}
+
+	return Count(session)
+}
+
 func GetDatasourcesCountBy(ctx *ctx.Context, typ, cate, name string) (int64, error) {
 	session := DB(ctx).Model(&Datasource{})
 
@@ -143,7 +185,7 @@ func GetDatasourcesCountBy(ctx *ctx.Context, typ, cate, name string) (int64, err
 		arr := strings.Fields(name)
 		for i := 0; i < len(arr); i++ {
 			qarg := "%" + arr[i] + "%"
-			session = session.Where("name like  ?", qarg)
+			session = session.Where("name =  ?", qarg)
 		}
 	}
 
@@ -165,7 +207,7 @@ func GetDatasourcesGetsBy(ctx *ctx.Context, typ, cate, name, status string) ([]*
 		arr := strings.Fields(name)
 		for i := 0; i < len(arr); i++ {
 			qarg := "%" + arr[i] + "%"
-			session = session.Where("name = ?", qarg)
+			session = session.Where("name =  ?", qarg)
 		}
 	}
 
@@ -267,19 +309,32 @@ func (ds *Datasource) DB2FE() error {
 
 func DatasourceGetMap(ctx *ctx.Context) (map[int64]*Datasource, error) {
 	var lst []*Datasource
-	err := DB(ctx).Find(&lst).Error
-	if err != nil {
-		return nil, err
+	var err error
+	if !ctx.IsCenter {
+		lst, err = poster.GetByUrls[[]*Datasource](ctx, "/v1/n9e/datasources")
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i < len(lst); i++ {
+			lst[i].FE2DB()
+		}
+	} else {
+		err := DB(ctx).Find(&lst).Error
+		if err != nil {
+			return nil, err
+		}
+
+		for i := 0; i < len(lst); i++ {
+			err := lst[i].DB2FE()
+			if err != nil {
+				logger.Warningf("get ds:%+v err:%v", lst[i], err)
+				continue
+			}
+		}
 	}
 
 	ret := make(map[int64]*Datasource)
 	for i := 0; i < len(lst); i++ {
-		err := lst[i].DB2FE()
-		if err != nil {
-			logger.Warningf("get ds:%+v err:%v", lst[i], err)
-			continue
-		}
-
 		ret[lst[i].Id] = lst[i]
 	}
 
@@ -287,6 +342,11 @@ func DatasourceGetMap(ctx *ctx.Context) (map[int64]*Datasource, error) {
 }
 
 func DatasourceStatistics(ctx *ctx.Context) (*Statistics, error) {
+	if !ctx.IsCenter {
+		s, err := poster.GetByUrls[*Statistics](ctx, "/v1/n9e/statistic?name=datasource")
+		return s, err
+	}
+
 	session := DB(ctx).Model(&Datasource{}).Select("count(*) as total", "max(updated_at) as last_updated")
 
 	var stats []*Statistics

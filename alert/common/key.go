@@ -3,7 +3,7 @@ package common
 import (
 	"fmt"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
 )
 
 func RuleKey(datasourceId, id int64) string {
@@ -17,6 +17,14 @@ func MatchTags(eventTagsMap map[string]string, itags []models.TagFilter) bool {
 			return false
 		}
 		if !matchTag(value, filter) {
+			return false
+		}
+	}
+	return true
+}
+func MatchGroupsName(groupName string, groupFilter []models.TagFilter) bool {
+	for _, filter := range groupFilter {
+		if !matchTag(groupName, filter) {
 			return false
 		}
 	}

@@ -3,16 +3,14 @@ package prom
 import (
 	"sync"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/prom"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/prom"
 )
 
 type PromClientMap struct {
 	sync.RWMutex
 	ctx           *ctx.Context
-	heartbeat     aconf.HeartbeatConfig
 	ReaderClients map[int64]prom.API
 	WriterClients map[int64]prom.WriterType
 }
@@ -71,9 +69,9 @@ func (pc *PromClientMap) Hit(datasourceIds []int64) []int64 {
 	dsIds := make([]int64, 0, len(pc.ReaderClients))
 	if len(datasourceIds) == 1 && datasourceIds[0] == models.DatasourceIdAll {
 		for c := range pc.ReaderClients {
-			datasourceIds = append(datasourceIds, c)
+			dsIds = append(dsIds, c)
 		}
-		return datasourceIds
+		return dsIds
 	}
 
 	for dsId := range pc.ReaderClients {
@@ -99,4 +97,5 @@ func (pc *PromClientMap) Del(datasourceId int64) {
 	pc.Lock()
 	defer pc.Unlock()
 	delete(pc.ReaderClients, datasourceId)
+	delete(pc.WriterClients, datasourceId)
 }

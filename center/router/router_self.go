@@ -1,8 +1,9 @@
 package router
 
 import (
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ormx"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 )

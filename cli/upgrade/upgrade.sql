@@ -8,12 +8,18 @@ insert into `role_operation`(role_name, operation) values('Standard', '/trace/ex
 insert into `role_operation`(role_name, operation) values('Standard', '/alert-rules-built-in');
 insert into `role_operation`(role_name, operation) values('Standard', '/dashboards-built-in');
 insert into `role_operation`(role_name, operation) values('Standard', '/trace/dependencies');
+insert into `role_operation`(role_name, operation) values('Standard', '/help/servers');
+insert into `role_operation`(role_name, operation) values('Standard', '/help/migrate');
+
+insert into `role_operation`(role_name, operation) values('Admin', '/help/source');
+insert into `role_operation`(role_name, operation) values('Admin', '/help/sso');
+insert into `role_operation`(role_name, operation) values('Admin', '/help/notification-tpls');
+insert into `role_operation`(role_name, operation) values('Admin', '/help/notification-settings');
 
 alter table `board` add built_in tinyint(1) not null default 0 comment '0:false 1:true';
 alter table `board` add hide tinyint(1) not null default 0 comment '0:false 1:true';
 
 alter table `chart_share` add datasource_id bigint unsigned not null default 0;
-alter table `chart_share` drop dashboard_id;
 
 alter table `alert_rule` add datasource_ids varchar(255) not null default '';
 alter table `alert_rule` add rule_config text not null comment 'rule_config';

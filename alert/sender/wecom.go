@@ -3,11 +3,8 @@ package sender
 import (
 	"html/template"
 	"strings"
-	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/poster"
-	"github.com/toolkits/pkg/logger"
+	"github.com/ccfos/nightingale/v6/models"
 )
 
 type wecomMarkdown struct {
@@ -24,11 +21,11 @@ type WecomSender struct {
 }
 
 func (ws *WecomSender) Send(ctx MessageContext) {
-	if len(ctx.Users) == 0 || ctx.Rule == nil || ctx.Event == nil {
+	if len(ctx.Users) == 0 || len(ctx.Events) == 0 {
 		return
 	}
 	urls := ws.extract(ctx.Users)
-	message := BuildTplMessage(ws.tpl, ctx.Event)
+	message := BuildTplMessage(ws.tpl, ctx.Events)
 	for _, url := range urls {
 		body := wecom{
 			Msgtype: "markdown",
@@ -36,7 +33,7 @@ func (ws *WecomSender) Send(ctx MessageContext) {
 				Content: message,
 			},
 		}
-		ws.doSend(url, body)
+		doSend(url, body, models.Wecom, ctx.Stats)
 	}
 }
 
@@ -45,20 +42,11 @@ func (ws *WecomSender) extract(users []*models.User) []string {
 	for _, user := range users {
 		if token, has := user.ExtractToken(models.Wecom); has {
 			url := token
-			if !strings.HasPrefix(token, "https://") {
+			if !strings.HasPrefix(token, "https://") && !strings.HasPrefix(token, "http://") {
 				url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + token
 			}
 			urls = append(urls, url)
 		}
 	}
 	return urls
-}
-
-func (ws *WecomSender) doSend(url string, body wecom) {
-	res, code, err := poster.PostJSON(url, time.Second*5, body, 3)
-	if err != nil {
-		logger.Errorf("wecom_sender: result=fail url=%s code=%d error=%v response=%s", url, code, err, string(res))
-	} else {
-		logger.Infof("wecom_sender: result=succ url=%s code=%d response=%s", url, code, string(res))
-	}
 }

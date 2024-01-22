@@ -7,7 +7,8 @@ import (
 	"path"
 	"strings"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/file"
 	"github.com/toolkits/pkg/ginx"
@@ -77,7 +78,7 @@ func (rt *Router) builtinBoardCateGets(c *gin.Context) {
 	}
 
 	me := c.MustGet("user").(*models.User)
-	buildinFavoritesMap, err := models.BuiltinCateGetByUserId(rt.Ctx, me.Id)
+	builtinFavoritesMap, err := models.BuiltinCateGetByUserId(rt.Ctx, me.Id)
 	if err != nil {
 		logger.Warningf("get builtin favorites fail: %v", err)
 	}
@@ -90,6 +91,9 @@ func (rt *Router) builtinBoardCateGets(c *gin.Context) {
 		boardCate.Name = dir
 		files, err := file.FilesUnder(fp + "/" + dir + "/dashboards")
 		ginx.Dangerous(err)
+		if len(files) == 0 {
+			continue
+		}
 
 		var boards []Payload
 		for _, f := range files {
@@ -113,7 +117,7 @@ func (rt *Router) builtinBoardCateGets(c *gin.Context) {
 		}
 		boardCate.Boards = boards
 
-		if _, ok := buildinFavoritesMap[dir]; ok {
+		if _, ok := builtinFavoritesMap[dir]; ok {
 			boardCate.Favorite = true
 		}
 
@@ -169,7 +173,7 @@ func (rt *Router) builtinAlertCateGets(c *gin.Context) {
 	}
 
 	me := c.MustGet("user").(*models.User)
-	buildinFavoritesMap, err := models.BuiltinCateGetByUserId(rt.Ctx, me.Id)
+	builtinFavoritesMap, err := models.BuiltinCateGetByUserId(rt.Ctx, me.Id)
 	if err != nil {
 		logger.Warningf("get builtin favorites fail: %v", err)
 	}
@@ -206,7 +210,7 @@ func (rt *Router) builtinAlertCateGets(c *gin.Context) {
 			alertCate.IconUrl = fmt.Sprintf("/api/n9e/integrations/icon/%s/%s", dir, iconFiles[0])
 		}
 
-		if _, ok := buildinFavoritesMap[dir]; ok {
+		if _, ok := builtinFavoritesMap[dir]; ok {
 			alertCate.Favorite = true
 		}
 
@@ -229,7 +233,7 @@ func (rt *Router) builtinAlertRules(c *gin.Context) {
 	}
 
 	me := c.MustGet("user").(*models.User)
-	buildinFavoritesMap, err := models.BuiltinCateGetByUserId(rt.Ctx, me.Id)
+	builtinFavoritesMap, err := models.BuiltinCateGetByUserId(rt.Ctx, me.Id)
 	if err != nil {
 		logger.Warningf("get builtin favorites fail: %v", err)
 	}
@@ -242,6 +246,9 @@ func (rt *Router) builtinAlertRules(c *gin.Context) {
 		alertCate.Name = dir
 		files, err := file.FilesUnder(fp + "/" + dir + "/alerts")
 		ginx.Dangerous(err)
+		if len(files) == 0 {
+			continue
+		}
 
 		alertRules := make(map[string][]models.AlertRule)
 		for _, f := range files {
@@ -267,7 +274,7 @@ func (rt *Router) builtinAlertRules(c *gin.Context) {
 			alertCate.IconUrl = fmt.Sprintf("/api/n9e/integrations/icon/%s/%s", dir, iconFiles[0])
 		}
 
-		if _, ok := buildinFavoritesMap[dir]; ok {
+		if _, ok := builtinFavoritesMap[dir]; ok {
 			alertCate.Favorite = true
 		}
 
@@ -307,4 +314,27 @@ func (rt *Router) builtinIcon(c *gin.Context) {
 	cate := ginx.UrlParamStr(c, "cate")
 	iconPath := fp + "/" + cate + "/icon/" + ginx.UrlParamStr(c, "name")
 	c.File(path.Join(iconPath))
+}
+
+func (rt *Router) builtinMarkdown(c *gin.Context) {
+	fp := rt.Center.BuiltinIntegrationsDir
+	if fp == "" {
+		fp = path.Join(runner.Cwd, "integrations")
+	}
+	cate := ginx.UrlParamStr(c, "cate")
+
+	var markdown []byte
+	markdownDir := fp + "/" + cate + "/markdown"
+	markdownFiles, err := file.FilesUnder(markdownDir)
+	if err != nil {
+		logger.Warningf("get markdown fail: %v", err)
+	} else if len(markdownFiles) > 0 {
+		f := markdownFiles[0]
+		fn := markdownDir + "/" + f
+		markdown, err = file.ReadBytes(fn)
+		if err != nil {
+			logger.Warningf("get collect fail: %v", err)
+		}
+	}
+	ginx.NewRender(c).Data(string(markdown), nil)
 }

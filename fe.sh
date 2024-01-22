@@ -1,10 +1,27 @@
 #!/bin/bash
 
-TAG=$(curl -sX GET https://api.github.com/repos/n9e/fe/releases/latest   | awk '/tag_name/{print $4;exit}' FS='[""]')
-VERSION=$(echo $TAG)
+cp -f ./docker/initsql/a-n9e.sql n9e.sql
 
-curl -o n9e-fe-${VERSION}.tar.gz -L https://github.com/n9e/fe/releases/download/${TAG}/n9e-fe-${VERSION}.tar.gz  
+if [ ! -d "./pub" ]; then
+    TAG=$(curl -sX GET https://api.github.com/repos/n9e/fe/releases/latest   | awk '/tag_name/{print $4;exit}' FS='[""]')
 
-tar zxvf n9e-fe-${VERSION}.tar.gz
+    if ! curl -o n9e-fe-${TAG}.tar.gz -L https://github.com/n9e/fe/releases/download/${TAG}/n9e-fe-${TAG}.tar.gz; then
+        echo "failed to download n9e-fe-${TAG}.tar.gz!"
+        exit 1
+    fi
 
-cp ./docker/initsql/a-n9e.sql n9e.sql
+    if ! tar zxf n9e-fe-${TAG}.tar.gz; then
+        echo "failed to untar n9e-fe-${TAG}.tar.gz!"
+        exit 2
+    fi
+fi
+
+GOPATH=$(go env GOPATH)
+GOPATH=${GOPATH:-/home/runner/go}
+
+# Embed files into a go binary
+# go install github.com/rakyll/statik
+if ! $GOPATH/bin/statik -src=./pub -dest=./front; then
+    echo "failed to embed files into a go binary!"
+    exit 4
+fi

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"path"
 
-	"cncamp/pkg/third_party/nightingale/pkg/cfg"
-	"cncamp/pkg/third_party/nightingale/pkg/ormx"
-	"cncamp/pkg/third_party/nightingale/pkg/tlsx"
+	"github.com/ccfos/nightingale/v6/pkg/cfg"
+	"github.com/ccfos/nightingale/v6/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/pkg/tlsx"
 	"github.com/koding/multiconfig"
 )
 

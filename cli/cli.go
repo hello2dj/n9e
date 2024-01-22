@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"cncamp/pkg/third_party/nightingale/cli/upgrade"
+	"github.com/ccfos/nightingale/v6/cli/upgrade"
 )
 
 func Upgrade(configFile string) error {

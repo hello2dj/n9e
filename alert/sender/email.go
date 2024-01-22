@@ -2,12 +2,15 @@ package sender
 
 import (
 	"crypto/tls"
+	"errors"
 	"html/template"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/toolkits/pkg/logger"
+
 	"gopkg.in/gomail.v2"
 )
 
@@ -20,19 +23,21 @@ type EmailSender struct {
 }
 
 func (es *EmailSender) Send(ctx MessageContext) {
-	if len(ctx.Users) == 0 || ctx.Rule == nil || ctx.Event == nil {
+	if len(ctx.Users) == 0 || len(ctx.Events) == 0 {
 		return
 	}
 	tos := extract(ctx.Users)
 	var subject string
 
 	if es.subjectTpl != nil {
-		subject = BuildTplMessage(es.subjectTpl, ctx.Event)
+		subject = BuildTplMessage(es.subjectTpl, []*models.AlertCurEvent{ctx.Events[0]})
 	} else {
-		subject = ctx.Event.RuleName
+		subject = ctx.Events[0].RuleName
 	}
-	content := BuildTplMessage(es.contentTpl, ctx.Event)
+	content := BuildTplMessage(es.contentTpl, ctx.Events)
 	es.WriteEmail(subject, content, tos)
+
+	ctx.Stats.AlertNotifyTotal.WithLabelValues(models.Email).Add(float64(len(tos)))
 }
 
 func extract(users []*models.User) []string {
@@ -45,7 +50,7 @@ func extract(users []*models.User) []string {
 	return tos
 }
 
-func (es *EmailSender) SendEmail(subject, content string, tos []string, stmp aconf.SMTPConfig) {
+func SendEmail(subject, content string, tos []string, stmp aconf.SMTPConfig) error {
 	conf := stmp
 
 	d := gomail.NewDialer(conf.Host, conf.Port, conf.User, conf.Pass)
@@ -62,8 +67,9 @@ func (es *EmailSender) SendEmail(subject, content string, tos []string, stmp aco
 
 	err := d.DialAndSend(m)
 	if err != nil {
-		logger.Errorf("email_sender: failed to send: %v", err)
+		return errors.New("email_sender: failed to send: " + err.Error())
 	}
+	return nil
 }
 
 func (es *EmailSender) WriteEmail(subject, content string, tos []string) {
@@ -94,19 +100,21 @@ var mailQuit = make(chan struct{})
 func RestartEmailSender(smtp aconf.SMTPConfig) {
 	close(mailQuit)
 	mailQuit = make(chan struct{})
-	StartEmailSender(smtp)
+	startEmailSender(smtp)
 }
 
-func StartEmailSender(smtp aconf.SMTPConfig) {
+func InitEmailSender(smtp aconf.SMTPConfig) {
 	mailch = make(chan *gomail.Message, 100000)
+	startEmailSender(smtp)
+}
 
+func startEmailSender(smtp aconf.SMTPConfig) {
 	conf := smtp
-
 	if conf.Host == "" || conf.Port == 0 {
 		logger.Warning("SMTP configurations invalid")
 		return
 	}
-	logger.Infof("start email sender... %+v", conf)
+	logger.Infof("start email sender... conf.Host:%+v,conf.Port:%+v", conf.Host, conf.Port)
 
 	d := gomail.NewDialer(conf.Host, conf.Port, conf.User, conf.Pass)
 	if conf.InsecureSkipVerify {

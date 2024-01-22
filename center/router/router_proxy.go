@@ -3,38 +3,50 @@ package router
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
-	pkgprom "cncamp/pkg/third_party/nightingale/pkg/prom"
+	pkgprom "github.com/ccfos/nightingale/v6/pkg/prom"
+	"github.com/ccfos/nightingale/v6/prom"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/common/model"
 	"github.com/toolkits/pkg/ginx"
+	"github.com/toolkits/pkg/logger"
 )
 
-type queryFormItem struct {
+type QueryFormItem struct {
 	Start int64  `json:"start" binding:"required"`
 	End   int64  `json:"end" binding:"required"`
 	Step  int64  `json:"step" binding:"required"`
 	Query string `json:"query" binding:"required"`
 }
 
-type batchQueryForm struct {
+type BatchQueryForm struct {
 	DatasourceId int64           `json:"datasource_id" binding:"required"`
-	Queries      []queryFormItem `json:"queries" binding:"required"`
+	Queries      []QueryFormItem `json:"queries" binding:"required"`
 }
 
 func (rt *Router) promBatchQueryRange(c *gin.Context) {
-	var f batchQueryForm
+	var f BatchQueryForm
 	ginx.Dangerous(c.BindJSON(&f))
 
-	cli := rt.PromClients.GetCli(f.DatasourceId)
+	lst, err := PromBatchQueryRange(rt.PromClients, f)
+	ginx.NewRender(c).Data(lst, err)
+}
 
+func PromBatchQueryRange(pc *prom.PromClientMap, f BatchQueryForm) ([]model.Value, error) {
 	var lst []model.Value
+
+	cli := pc.GetCli(f.DatasourceId)
+	if cli == nil {
+		return lst, fmt.Errorf("no such datasource id: %d", f.DatasourceId)
+	}
 
 	for _, item := range f.Queries {
 		r := pkgprom.Range{
@@ -44,15 +56,16 @@ func (rt *Router) promBatchQueryRange(c *gin.Context) {
 		}
 
 		resp, _, err := cli.QueryRange(context.Background(), item.Query, r)
-		ginx.Dangerous(err)
+		if err != nil {
+			return lst, err
+		}
 
 		lst = append(lst, resp)
 	}
-
-	ginx.NewRender(c).Data(lst, nil)
+	return lst, nil
 }
 
-type batchInstantForm struct {
+type BatchInstantForm struct {
 	DatasourceId int64             `json:"datasource_id" binding:"required"`
 	Queries      []InstantFormItem `json:"queries" binding:"required"`
 }
@@ -63,21 +76,31 @@ type InstantFormItem struct {
 }
 
 func (rt *Router) promBatchQueryInstant(c *gin.Context) {
-	var f batchInstantForm
+	var f BatchInstantForm
 	ginx.Dangerous(c.BindJSON(&f))
 
-	cli := rt.PromClients.GetCli(f.DatasourceId)
+	lst, err := PromBatchQueryInstant(rt.PromClients, f)
+	ginx.NewRender(c).Data(lst, err)
+}
 
+func PromBatchQueryInstant(pc *prom.PromClientMap, f BatchInstantForm) ([]model.Value, error) {
 	var lst []model.Value
+
+	cli := pc.GetCli(f.DatasourceId)
+	if cli == nil {
+		logger.Warningf("no such datasource id: %d", f.DatasourceId)
+		return lst, fmt.Errorf("no such datasource id: %d", f.DatasourceId)
+	}
 
 	for _, item := range f.Queries {
 		resp, _, err := cli.Query(context.Background(), item.Query, time.Unix(item.Time, 0))
-		ginx.Dangerous(err)
+		if err != nil {
+			return lst, err
+		}
 
 		lst = append(lst, resp)
 	}
-
-	ginx.NewRender(c).Data(lst, nil)
+	return lst, nil
 }
 
 func (rt *Router) dsProxy(c *gin.Context) {
@@ -139,21 +162,77 @@ func (rt *Router) dsProxy(c *gin.Context) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 	}
 
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: ds.HTTPJson.TLS.SkipTlsVerify},
-		Proxy:           http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout: time.Duration(ds.HTTPJson.DialTimeout) * time.Millisecond,
-		}).DialContext,
-		ResponseHeaderTimeout: time.Duration(ds.HTTPJson.Timeout) * time.Millisecond,
-		MaxIdleConnsPerHost:   ds.HTTPJson.MaxIdleConnsPerHost,
+	transport, has := transportGet(dsId, ds.UpdatedAt)
+	if !has {
+		transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: ds.HTTPJson.TLS.SkipTlsVerify},
+			Proxy:           http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout: time.Duration(ds.HTTPJson.DialTimeout) * time.Millisecond,
+			}).DialContext,
+			ResponseHeaderTimeout: time.Duration(ds.HTTPJson.Timeout) * time.Millisecond,
+			MaxIdleConnsPerHost:   ds.HTTPJson.MaxIdleConnsPerHost,
+		}
+		transportPut(dsId, ds.UpdatedAt, transport)
+	}
+
+	modifyResponse := func(r *http.Response) error {
+		if r.StatusCode == http.StatusUnauthorized {
+			logger.Warningf("proxy path:%s unauthorized access ", c.Request.URL.Path)
+			return fmt.Errorf("unauthorized access")
+		}
+
+		return nil
 	}
 
 	proxy := &httputil.ReverseProxy{
-		Director:     director,
-		Transport:    transport,
-		ErrorHandler: errFunc,
+		Director:       director,
+		Transport:      transport,
+		ErrorHandler:   errFunc,
+		ModifyResponse: modifyResponse,
 	}
 
 	proxy.ServeHTTP(c.Writer, c.Request)
+
+}
+
+var (
+	transports     = map[int64]http.RoundTripper{}
+	updatedAts     = map[int64]int64{}
+	transportsLock = &sync.Mutex{}
+)
+
+func transportGet(dsid, newUpdatedAt int64) (http.RoundTripper, bool) {
+	transportsLock.Lock()
+	defer transportsLock.Unlock()
+
+	tran, has := transports[dsid]
+	if !has {
+		return nil, false
+	}
+
+	oldUpdateAt, has := updatedAts[dsid]
+	if !has {
+		oldtran := tran.(*http.Transport)
+		oldtran.CloseIdleConnections()
+		delete(transports, dsid)
+		return nil, false
+	}
+
+	if oldUpdateAt != newUpdatedAt {
+		oldtran := tran.(*http.Transport)
+		oldtran.CloseIdleConnections()
+		delete(transports, dsid)
+		delete(updatedAts, dsid)
+		return nil, false
+	}
+
+	return tran, has
+}
+
+func transportPut(dsid, updatedat int64, tran http.RoundTripper) {
+	transportsLock.Lock()
+	transports[dsid] = tran
+	updatedAts[dsid] = updatedat
+	transportsLock.Unlock()
 }

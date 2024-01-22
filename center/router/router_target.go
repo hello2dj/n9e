@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/storage"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/storage"
+
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/common/model"
 	"github.com/toolkits/pkg/ginx"
 	"github.com/toolkits/pkg/logger"
+	"github.com/toolkits/pkg/str"
 )
 
 type TargetQuery struct {
@@ -41,15 +43,32 @@ func (rt *Router) targetGetsByHostFilter(c *gin.Context) {
 }
 
 func (rt *Router) targetGets(c *gin.Context) {
-	bgid := ginx.QueryInt64(c, "bgid", -1)
+	bgids := str.IdsInt64(ginx.QueryStr(c, "gids", ""), ",")
 	query := ginx.QueryStr(c, "query", "")
 	limit := ginx.QueryInt(c, "limit", 30)
+	downtime := ginx.QueryInt64(c, "downtime", 0)
 	dsIds := queryDatasourceIds(c)
 
-	total, err := models.TargetTotal(rt.Ctx, bgid, dsIds, query)
+	var err error
+	if len(bgids) == 0 {
+		user := c.MustGet("user").(*models.User)
+		if !user.IsAdmin() {
+			// 如果是非 admin 用户，全部对象的情况，找到用户有权限的业务组
+			userGroupIds, err := models.MyGroupIds(rt.Ctx, user.Id)
+			ginx.Dangerous(err)
+
+			bgids, err = models.BusiGroupIds(rt.Ctx, userGroupIds)
+			ginx.Dangerous(err)
+
+			// 将未分配业务组的对象也加入到列表中
+			bgids = append(bgids, 0)
+		}
+	}
+
+	total, err := models.TargetTotal(rt.Ctx, bgids, dsIds, query, downtime)
 	ginx.Dangerous(err)
 
-	list, err := models.TargetGets(rt.Ctx, bgid, dsIds, query, limit, ginx.Offset(c, limit))
+	list, err := models.TargetGets(rt.Ctx, bgids, dsIds, query, downtime, limit, ginx.Offset(c, limit))
 	ginx.Dangerous(err)
 
 	if err == nil {
@@ -60,31 +79,35 @@ func (rt *Router) targetGets(c *gin.Context) {
 		for i := 0; i < len(list); i++ {
 			ginx.Dangerous(list[i].FillGroup(rt.Ctx, cache))
 			keys = append(keys, models.WrapIdent(list[i].Ident))
+
+			if now.Unix()-list[i].UpdateAt < 60 {
+				list[i].TargetUp = 2
+			} else if now.Unix()-list[i].UpdateAt < 180 {
+				list[i].TargetUp = 1
+			}
 		}
 
 		if len(keys) > 0 {
 			metaMap := make(map[string]*models.HostMeta)
 			vals, err := storage.MGet(context.Background(), rt.Redis, keys)
-			if err == nil {
-				for _, value := range vals {
-					var meta models.HostMeta
-					if value == nil {
-						continue
-					}
-					err := json.Unmarshal(value, &meta)
-					if err != nil {
-						logger.Warningf("unmarshal %v host meta failed: %v", value, err)
-						continue
-					}
-					metaMap[meta.Hostname] = &meta
+			if err != nil {
+				logger.Warningf("get host meta failed: %v", err)
+				return
+			}
+			for _, value := range vals {
+				var meta models.HostMeta
+				if value == nil {
+					continue
 				}
+				err := json.Unmarshal(value, &meta)
+				if err != nil {
+					logger.Warningf("unmarshal %v host meta failed: %v", value, err)
+					continue
+				}
+				metaMap[meta.Hostname] = &meta
 			}
 
 			for i := 0; i < len(list); i++ {
-				if now.Unix()-list[i].UpdateAt < 120 {
-					list[i].TargetUp = 1
-				}
-
 				if meta, ok := metaMap[list[i].Ident]; ok {
 					list[i].FillMeta(meta)
 				} else {
@@ -100,6 +123,11 @@ func (rt *Router) targetGets(c *gin.Context) {
 		"list":  list,
 		"total": total,
 	}, nil)
+}
+
+func (rt *Router) targetGetsByService(c *gin.Context) {
+	lst, err := models.TargetGetsAll(rt.Ctx)
+	ginx.NewRender(c).Data(lst, err)
 }
 
 func (rt *Router) targetGetTags(c *gin.Context) {

@@ -2,13 +2,13 @@ package models
 
 import (
 	"encoding/json"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
 	"github.com/pkg/errors"
 	"github.com/toolkits/pkg/logger"
 )
@@ -24,8 +24,10 @@ type AlertSubscribe struct {
 	DatasourceIdsJson []int64      `json:"datasource_ids" gorm:"-"` // for fe
 	Cluster           string       `json:"cluster"`                 // take effect by clusters, seperated by space
 	RuleId            int64        `json:"rule_id"`
-	ForDuration       int64        `json:"for_duration"`       // for duration, unit: second
-	RuleName          string       `json:"rule_name" gorm:"-"` // for fe
+	Severities        string       `json:"-" gorm:"severities"` // sub severity
+	SeveritiesJson    []int        `json:"severities" gorm:"-"` // for fe
+	ForDuration       int64        `json:"for_duration"`        // for duration, unit: second
+	RuleName          string       `json:"rule_name" gorm:"-"`  // for fe
 	Tags              ormx.JSONArr `json:"tags"`
 	RedefineSeverity  int          `json:"redefine_severity"`
 	NewSeverity       int          `json:"new_severity"`
@@ -36,11 +38,16 @@ type AlertSubscribe struct {
 	RedefineWebhooks  int          `json:"redefine_webhooks"`
 	Webhooks          string       `json:"-" gorm:"webhooks"`
 	WebhooksJson      []string     `json:"webhooks" gorm:"-"`
+	ExtraConfig       string       `json:"-" grom:"extra_config"`
+	ExtraConfigJson   interface{}  `json:"extra_config" gorm:"-"` // for fe
+	Note              string       `json:"note"`
 	CreateBy          string       `json:"create_by"`
 	CreateAt          int64        `json:"create_at"`
 	UpdateBy          string       `json:"update_by"`
 	UpdateAt          int64        `json:"update_at"`
 	ITags             []TagFilter  `json:"-" gorm:"-"` // inner tags
+	BusiGroups        ormx.JSONArr `json:"busi_groups"`
+	IBusiGroups       []TagFilter  `json:"-" gorm:"-"` // inner busiGroups
 }
 
 func (s *AlertSubscribe) TableName() string {
@@ -49,6 +56,23 @@ func (s *AlertSubscribe) TableName() string {
 
 func AlertSubscribeGets(ctx *ctx.Context, groupId int64) (lst []AlertSubscribe, err error) {
 	err = DB(ctx).Where("group_id=?", groupId).Order("id desc").Find(&lst).Error
+	return
+}
+
+func AlertSubscribeGetsByBGIds(ctx *ctx.Context, bgIds []int64) (lst []AlertSubscribe, err error) {
+	err = DB(ctx).Where("group_id in (?)", bgIds).Order("id desc").Find(&lst).Error
+	return
+}
+
+func AlertSubscribeGetsByService(ctx *ctx.Context) (lst []AlertSubscribe, err error) {
+	err = DB(ctx).Find(&lst).Error
+	if err != nil {
+		return
+	}
+
+	for i := range lst {
+		lst[i].DB2FE()
+	}
 	return
 }
 
@@ -79,8 +103,8 @@ func (s *AlertSubscribe) Verify() error {
 		return err
 	}
 
-	if len(s.ITags) == 0 && s.RuleId == 0 {
-		return errors.New("rule_id and tags are both blank")
+	if len(s.SeveritiesJson) == 0 {
+		return errors.New("severities is required")
 	}
 
 	ugids := strings.Fields(s.UserGroupIds)
@@ -94,15 +118,22 @@ func (s *AlertSubscribe) Verify() error {
 }
 
 func (s *AlertSubscribe) FE2DB() error {
-	idsByte, err := json.Marshal(s.DatasourceIdsJson)
-	if err != nil {
-		return err
+	if len(s.DatasourceIdsJson) > 0 {
+		idsByte, _ := json.Marshal(s.DatasourceIdsJson)
+		s.DatasourceIds = string(idsByte)
 	}
-	s.DatasourceIds = string(idsByte)
 
 	if len(s.WebhooksJson) > 0 {
 		b, _ := json.Marshal(s.WebhooksJson)
 		s.Webhooks = string(b)
+	}
+
+	b, _ := json.Marshal(s.ExtraConfigJson)
+	s.ExtraConfig = string(b)
+
+	if len(s.SeveritiesJson) > 0 {
+		b, _ := json.Marshal(s.SeveritiesJson)
+		s.Severities = string(b)
 	}
 
 	return nil
@@ -120,30 +151,29 @@ func (s *AlertSubscribe) DB2FE() error {
 			return err
 		}
 	}
+
+	if s.ExtraConfig != "" {
+		if err := json.Unmarshal([]byte(s.ExtraConfig), &s.ExtraConfigJson); err != nil {
+			return err
+		}
+	}
+
+	if s.Severities != "" {
+		if err := json.Unmarshal([]byte(s.Severities), &s.SeveritiesJson); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (s *AlertSubscribe) Parse() error {
-	err := json.Unmarshal(s.Tags, &s.ITags)
+	var err error
+	s.ITags, err = GetTagFilters(s.Tags)
 	if err != nil {
 		return err
 	}
-
-	for i := 0; i < len(s.ITags); i++ {
-		if s.ITags[i].Func == "=~" || s.ITags[i].Func == "!~" {
-			s.ITags[i].Regexp, err = regexp.Compile(s.ITags[i].Value)
-			if err != nil {
-				return err
-			}
-		} else if s.ITags[i].Func == "in" || s.ITags[i].Func == "not in" {
-			arr := strings.Fields(s.ITags[i].Value)
-			s.ITags[i].Vset = make(map[string]struct{})
-			for j := 0; j < len(arr); j++ {
-				s.ITags[i].Vset[arr[j]] = struct{}{}
-			}
-		}
-	}
-
+	s.IBusiGroups, err = GetTagFilters(s.BusiGroups)
 	return err
 }
 
@@ -208,7 +238,7 @@ func (s *AlertSubscribe) FillUserGroups(ctx *ctx.Context, cache map[int64]*UserG
 	}
 
 	exists := make([]string, 0, count)
-	delete := false
+	isDelete := false
 	for i := range ugids {
 		id, _ := strconv.ParseInt(ugids[i], 10, 64)
 
@@ -225,7 +255,7 @@ func (s *AlertSubscribe) FillUserGroups(ctx *ctx.Context, cache map[int64]*UserG
 		}
 
 		if ug == nil {
-			delete = true
+			isDelete = true
 		} else {
 			exists = append(exists, ugids[i])
 			s.UserGroups = append(s.UserGroups, *ug)
@@ -233,7 +263,7 @@ func (s *AlertSubscribe) FillUserGroups(ctx *ctx.Context, cache map[int64]*UserG
 		}
 	}
 
-	if delete {
+	if isDelete {
 		// some user-group already deleted
 		DB(ctx).Model(s).Update("user_group_ids", strings.Join(exists, " "))
 		s.UserGroupIds = strings.Join(exists, " ")
@@ -262,6 +292,11 @@ func AlertSubscribeDel(ctx *ctx.Context, ids []int64) error {
 }
 
 func AlertSubscribeStatistics(ctx *ctx.Context) (*Statistics, error) {
+	if !ctx.IsCenter {
+		s, err := poster.GetByUrls[*Statistics](ctx, "/v1/n9e/statistic?name=alert_subscribe")
+		return s, err
+	}
+
 	session := DB(ctx).Model(&AlertSubscribe{}).Select("count(*) as total", "max(update_at) as last_updated")
 
 	var stats []*Statistics
@@ -274,12 +309,31 @@ func AlertSubscribeStatistics(ctx *ctx.Context) (*Statistics, error) {
 }
 
 func AlertSubscribeGetsAll(ctx *ctx.Context) ([]*AlertSubscribe, error) {
+	if !ctx.IsCenter {
+		lst, err := poster.GetByUrls[[]*AlertSubscribe](ctx, "/v1/n9e/alert-subscribes")
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i < len(lst); i++ {
+			lst[i].FE2DB()
+		}
+		return lst, err
+	}
+
 	// get my cluster's subscribes
 	session := DB(ctx).Model(&AlertSubscribe{})
 
 	var lst []*AlertSubscribe
 	err := session.Find(&lst).Error
 	return lst, err
+}
+
+func (s *AlertSubscribe) MatchProd(prod string) bool {
+	//Replace 'prod' with optional item
+	if s.Prod == "" {
+		return true
+	}
+	return s.Prod == prod
 }
 
 func (s *AlertSubscribe) MatchCluster(dsId int64) bool {

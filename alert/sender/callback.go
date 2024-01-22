@@ -1,20 +1,24 @@
 package sender
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/memsto"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/ibex"
-	"cncamp/pkg/third_party/nightingale/pkg/poster"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/alert/astats"
+	"github.com/ccfos/nightingale/v6/memsto"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ibex"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+
 	"github.com/toolkits/pkg/logger"
 )
 
-func SendCallbacks(ctx *ctx.Context, urls []string, event *models.AlertCurEvent, targetCache *memsto.TargetCacheType, ibexConf aconf.Ibex) {
+func SendCallbacks(ctx *ctx.Context, urls []string, event *models.AlertCurEvent, targetCache *memsto.TargetCacheType, userCache *memsto.UserCacheType,
+	ibexConf aconf.Ibex, stats *astats.Stats) {
 	for _, url := range urls {
 		if url == "" {
 			continue
@@ -22,7 +26,7 @@ func SendCallbacks(ctx *ctx.Context, urls []string, event *models.AlertCurEvent,
 
 		if strings.HasPrefix(url, "${ibex}") {
 			if !event.IsRecovered {
-				handleIbex(ctx, url, event, targetCache, ibexConf)
+				handleIbex(ctx, url, event, targetCache, userCache, ibexConf)
 			}
 			continue
 		}
@@ -31,11 +35,13 @@ func SendCallbacks(ctx *ctx.Context, urls []string, event *models.AlertCurEvent,
 			url = "http://" + url
 		}
 
+		stats.AlertNotifyTotal.WithLabelValues("rule_callback").Inc()
 		resp, code, err := poster.PostJSON(url, 5*time.Second, event, 3)
 		if err != nil {
-			logger.Errorf("event_callback(rule_id=%d url=%s) fail, resp: %s, err: %v, code: %d", event.RuleId, url, string(resp), err, code)
+			logger.Errorf("event_callback_fail(rule_id=%d url=%s), resp: %s, err: %v, code: %d", event.RuleId, url, string(resp), err, code)
+			stats.AlertNotifyErrorTotal.WithLabelValues("rule_callback").Inc()
 		} else {
-			logger.Infof("event_callback(rule_id=%d url=%s) succ, resp: %s, code: %d", event.RuleId, url, string(resp), code)
+			logger.Infof("event_callback_succ(rule_id=%d url=%s), resp: %s, code: %d", event.RuleId, url, string(resp), code)
 		}
 	}
 }
@@ -49,6 +55,7 @@ type TaskForm struct {
 	Pause     string   `json:"pause"`
 	Script    string   `json:"script"`
 	Args      string   `json:"args"`
+	Stdin     string   `json:"stdin"`
 	Action    string   `json:"action"`
 	Creator   string   `json:"creator"`
 	Hosts     []string `json:"hosts"`
@@ -59,7 +66,7 @@ type TaskCreateReply struct {
 	Dat int64  `json:"dat"` // task.id
 }
 
-func handleIbex(ctx *ctx.Context, url string, event *models.AlertCurEvent, targetCache *memsto.TargetCacheType, ibexConf aconf.Ibex) {
+func handleIbex(ctx *ctx.Context, url string, event *models.AlertCurEvent, targetCache *memsto.TargetCacheType, userCache *memsto.UserCacheType, ibexConf aconf.Ibex) {
 	arr := strings.Split(url, "/")
 
 	var idstr string
@@ -89,7 +96,7 @@ func handleIbex(ctx *ctx.Context, url string, event *models.AlertCurEvent, targe
 		return
 	}
 
-	tpl, err := models.TaskTplGet(ctx, "id = ?", id)
+	tpl, err := models.TaskTplGetById(ctx, id)
 	if err != nil {
 		logger.Errorf("event_callback_ibex: failed to get tpl: %v", err)
 		return
@@ -102,7 +109,7 @@ func handleIbex(ctx *ctx.Context, url string, event *models.AlertCurEvent, targe
 
 	// check perm
 	// tpl.GroupId - host - account 三元组校验权限
-	can, err := canDoIbex(ctx, tpl.UpdateBy, tpl, host, targetCache)
+	can, err := canDoIbex(ctx, tpl.UpdateBy, tpl, host, targetCache, userCache)
 	if err != nil {
 		logger.Errorf("event_callback_ibex: check perm fail: %v", err)
 		return
@@ -110,6 +117,30 @@ func handleIbex(ctx *ctx.Context, url string, event *models.AlertCurEvent, targe
 
 	if !can {
 		logger.Errorf("event_callback_ibex: user(%s) no permission", tpl.UpdateBy)
+		return
+	}
+
+	tagsMap := make(map[string]string)
+	for i := 0; i < len(event.TagsJSON); i++ {
+		pair := strings.TrimSpace(event.TagsJSON[i])
+		if pair == "" {
+			continue
+		}
+
+		arr := strings.Split(pair, "=")
+		if len(arr) != 2 {
+			continue
+		}
+
+		tagsMap[arr[0]] = arr[1]
+	}
+	// 附加告警级别  告警触发值标签
+	tagsMap["alert_severity"] = strconv.Itoa(event.Severity)
+	tagsMap["alert_trigger_value"] = event.TriggerValue
+
+	tags, err := json.Marshal(tagsMap)
+	if err != nil {
+		logger.Errorf("event_callback_ibex: failed to marshal tags to json: %v", tagsMap)
 		return
 	}
 
@@ -123,6 +154,7 @@ func handleIbex(ctx *ctx.Context, url string, event *models.AlertCurEvent, targe
 		Pause:     tpl.Pause,
 		Script:    tpl.Script,
 		Args:      tpl.Args,
+		Stdin:     string(tags),
 		Action:    "start",
 		Creator:   tpl.UpdateBy,
 		Hosts:     []string{host},
@@ -175,12 +207,8 @@ func handleIbex(ctx *ctx.Context, url string, event *models.AlertCurEvent, targe
 	}
 }
 
-func canDoIbex(ctx *ctx.Context, username string, tpl *models.TaskTpl, host string, targetCache *memsto.TargetCacheType) (bool, error) {
-	user, err := models.UserGetByUsername(ctx, username)
-	if err != nil {
-		return false, err
-	}
-
+func canDoIbex(ctx *ctx.Context, username string, tpl *models.TaskTpl, host string, targetCache *memsto.TargetCacheType, userCache *memsto.UserCacheType) (bool, error) {
+	user := userCache.GetByUsername(username)
 	if user != nil && user.IsAdmin() {
 		return true, nil
 	}

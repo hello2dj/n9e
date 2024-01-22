@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/aop"
-	"cncamp/pkg/third_party/nightingale/pkg/version"
+	"github.com/ccfos/nightingale/v6/pkg/aop"
+	"github.com/ccfos/nightingale/v6/pkg/version"
+
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -23,6 +24,7 @@ type Config struct {
 	KeyFile          string
 	PProf            bool
 	PrintAccessLog   bool
+	PrintBody        bool
 	ExposeMetrics    bool
 	ShutdownTimeout  int
 	MaxContentLength int64
@@ -31,28 +33,26 @@ type Config struct {
 	IdleTimeout      int
 	JWTAuth          JWTAuth
 	ProxyAuth        ProxyAuth
-	Alert            Alert
-	Pushgw           Pushgw
-	Heartbeat        Heartbeat
-	Service          Service
+	ShowCaptcha      ShowCaptcha
+	APIForAgent      BasicAuths
+	APIForService    BasicAuths
+	RSA              RSAConfig
 }
 
-type Alert struct {
-	BasicAuth gin.Accounts
-	Enable    bool
+type RSAConfig struct {
+	OpenRSA           bool
+	RSAPublicKey      []byte
+	RSAPublicKeyPath  string
+	RSAPrivateKey     []byte
+	RSAPrivateKeyPath string
+	RSAPassWord       string
 }
 
-type Pushgw struct {
-	BasicAuth gin.Accounts
-	Enable    bool
+type ShowCaptcha struct {
+	Enable bool
 }
 
-type Heartbeat struct {
-	BasicAuth gin.Accounts
-	Enable    bool
-}
-
-type Service struct {
+type BasicAuths struct {
 	BasicAuth gin.Accounts
 	Enable    bool
 }
@@ -73,7 +73,7 @@ type JWTAuth struct {
 func GinEngine(mode string, cfg Config) *gin.Engine {
 	gin.SetMode(mode)
 
-	loggerMid := aop.Logger()
+	loggerMid := aop.Logger(aop.LoggerConfig{PrintBody: cfg.PrintBody})
 	recoveryMid := aop.Recovery()
 
 	if strings.ToLower(mode) == "release" {

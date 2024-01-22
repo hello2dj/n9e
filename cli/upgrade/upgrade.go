@@ -3,9 +3,9 @@ package upgrade
 import (
 	"context"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/storage"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/storage"
 	"github.com/toolkits/pkg/logger"
 )
 
@@ -18,9 +18,9 @@ func Upgrade(configFile string) error {
 		return err
 	}
 
-	ctx := ctx.NewContext(context.Background(), db)
+	ctx := ctx.NewContext(context.Background(), db, true)
 	for _, cluster := range config.Clusters {
-		count, err := models.GetDatasourcesCountBy(ctx, "", "", cluster.Name)
+		count, err := models.GetDatasourcesCountByName(ctx, cluster.Name)
 		if err != nil {
 			logger.Errorf("get datasource %s count error: %v", cluster.Name, err)
 			continue

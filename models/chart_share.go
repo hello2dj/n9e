@@ -1,6 +1,6 @@
 package models
 
-import "cncamp/pkg/third_party/nightingale/pkg/ctx"
+import "github.com/ccfos/nightingale/v6/pkg/ctx"
 
 type ChartShare struct {
 	Id           int64  `json:"id" gorm:"primaryKey"`

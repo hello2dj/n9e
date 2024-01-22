@@ -3,12 +3,13 @@ package router
 import (
 	"net/http"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/alert/astats"
-	"cncamp/pkg/third_party/nightingale/alert/process"
-	"cncamp/pkg/third_party/nightingale/memsto"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/httpx"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/alert/astats"
+	"github.com/ccfos/nightingale/v6/alert/process"
+	"github.com/ccfos/nightingale/v6/memsto"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/httpx"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -38,15 +39,16 @@ func New(httpConfig httpx.Config, alert aconf.Alert, amc *memsto.AlertMuteCacheT
 }
 
 func (rt *Router) Config(r *gin.Engine) {
-	if !rt.HTTP.Alert.Enable {
+	if !rt.HTTP.APIForService.Enable {
 		return
 	}
 
 	service := r.Group("/v1/n9e")
-	if len(rt.HTTP.Alert.BasicAuth) > 0 {
-		service.Use(gin.BasicAuth(rt.HTTP.Alert.BasicAuth))
+	if len(rt.HTTP.APIForService.BasicAuth) > 0 {
+		service.Use(gin.BasicAuth(rt.HTTP.APIForService.BasicAuth))
 	}
 	service.POST("/event", rt.pushEventToQueue)
+	service.POST("/event-persist", rt.eventPersist)
 	service.POST("/make-event", rt.makeEvent)
 }
 

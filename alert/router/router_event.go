@@ -5,14 +5,15 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/common"
-	"cncamp/pkg/third_party/nightingale/alert/dispatch"
-	"cncamp/pkg/third_party/nightingale/alert/mute"
-	"cncamp/pkg/third_party/nightingale/alert/naming"
-	"cncamp/pkg/third_party/nightingale/alert/process"
-	"cncamp/pkg/third_party/nightingale/alert/queue"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/poster"
+	"github.com/ccfos/nightingale/v6/alert/common"
+	"github.com/ccfos/nightingale/v6/alert/dispatch"
+	"github.com/ccfos/nightingale/v6/alert/mute"
+	"github.com/ccfos/nightingale/v6/alert/naming"
+	"github.com/ccfos/nightingale/v6/alert/process"
+	"github.com/ccfos/nightingale/v6/alert/queue"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 	"github.com/toolkits/pkg/logger"
@@ -71,8 +72,6 @@ func (rt *Router) pushEventToQueue(c *gin.Context) {
 	event.NotifyChannels = strings.Join(event.NotifyChannelsJSON, " ")
 	event.NotifyGroups = strings.Join(event.NotifyGroupsJSON, " ")
 
-	rt.AlertStats.CounterAlertsTotal.WithLabelValues(event.Cluster).Inc()
-
 	dispatch.LogEvent(event, "http_push_queue")
 	if !queue.EventQueue.PushFront(event) {
 		msg := fmt.Sprintf("event:%+v push_queue err: queue is full", event)
@@ -80,6 +79,14 @@ func (rt *Router) pushEventToQueue(c *gin.Context) {
 		logger.Warningf(msg)
 	}
 	ginx.NewRender(c).Message(nil)
+}
+
+func (rt *Router) eventPersist(c *gin.Context) {
+	var event *models.AlertCurEvent
+	ginx.BindJSON(c, &event)
+	event.FE2DB()
+	err := models.EventPersist(rt.Ctx, event)
+	ginx.NewRender(c).Data(event.Id, err)
 }
 
 type eventForm struct {

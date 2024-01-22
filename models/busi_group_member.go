@@ -1,6 +1,6 @@
 package models
 
-import "cncamp/pkg/third_party/nightingale/pkg/ctx"
+import "github.com/ccfos/nightingale/v6/pkg/ctx"
 
 type BusiGroupMember struct {
 	BusiGroupId int64  `json:"busi_group_id"`
@@ -10,6 +10,10 @@ type BusiGroupMember struct {
 
 func (BusiGroupMember) TableName() string {
 	return "busi_group_member"
+}
+
+func (bgm *BusiGroupMember) DB2FE() error {
+	return nil
 }
 
 func BusiGroupIds(ctx *ctx.Context, userGroupIds []int64, permFlag ...string) ([]int64, error) {

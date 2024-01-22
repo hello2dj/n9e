@@ -2,19 +2,15 @@ package storage
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/tlsx"
+	"github.com/ccfos/nightingale/v6/pkg/tlsx"
 	"github.com/redis/go-redis/v9"
 )
 
 type RedisConfig struct {
 	Address  string
 	Username string
-	DataDir  string
 	Password string
 	DB       int
 	UseTLS   bool
@@ -23,6 +19,7 @@ type RedisConfig struct {
 	MasterName       string
 	SentinelUsername string
 	SentinelPassword string
+	DataDir          string
 }
 
 type Redis interface {
@@ -40,95 +37,97 @@ type Redis interface {
 	// Publish(ctx context.Context, channel string, message interface{}) *redis.IntCmd
 }
 
-func NewRedis(cfg RedisConfig) (Redis, error) {
-	var redisClient Redis
-	switch cfg.RedisType {
-	case "standalone", "":
-		redisOptions := &redis.Options{
-			Addr:     cfg.Address,
-			Username: cfg.Username,
-			Password: cfg.Password,
-			DB:       cfg.DB,
-		}
+// type Redis redis.Cmdable
 
-		if cfg.UseTLS {
-			tlsConfig, err := cfg.TLSConfig()
-			if err != nil {
-				fmt.Println("failed to init redis tls config:", err)
-				os.Exit(1)
-			}
-			redisOptions.TLSConfig = tlsConfig
-		}
+// func NewRedis(cfg RedisConfig) (Redis, error) {
+// 	var redisClient Redis
+// 	switch cfg.RedisType {
+// 	case "standalone", "":
+// 		redisOptions := &redis.Options{
+// 			Addr:     cfg.Address,
+// 			Username: cfg.Username,
+// 			Password: cfg.Password,
+// 			DB:       cfg.DB,
+// 		}
 
-		redisClient = redis.NewClient(redisOptions)
+// 		if cfg.UseTLS {
+// 			tlsConfig, err := cfg.TLSConfig()
+// 			if err != nil {
+// 				fmt.Println("failed to init redis tls config:", err)
+// 				os.Exit(1)
+// 			}
+// 			redisOptions.TLSConfig = tlsConfig
+// 		}
 
-	case "cluster":
-		redisOptions := &redis.ClusterOptions{
-			Addrs:    strings.Split(cfg.Address, ","),
-			Username: cfg.Username,
-			Password: cfg.Password,
-		}
+// 		redisClient = redis.NewClient(redisOptions)
 
-		if cfg.UseTLS {
-			tlsConfig, err := cfg.TLSConfig()
-			if err != nil {
-				fmt.Println("failed to init redis tls config:", err)
-				os.Exit(1)
-			}
-			redisOptions.TLSConfig = tlsConfig
-		}
+// 	case "cluster":
+// 		redisOptions := &redis.ClusterOptions{
+// 			Addrs:    strings.Split(cfg.Address, ","),
+// 			Username: cfg.Username,
+// 			Password: cfg.Password,
+// 		}
 
-		redisClient = redis.NewClusterClient(redisOptions)
+// 		if cfg.UseTLS {
+// 			tlsConfig, err := cfg.TLSConfig()
+// 			if err != nil {
+// 				fmt.Println("failed to init redis tls config:", err)
+// 				os.Exit(1)
+// 			}
+// 			redisOptions.TLSConfig = tlsConfig
+// 		}
 
-	case "sentinel":
-		redisOptions := &redis.FailoverOptions{
-			MasterName:       cfg.MasterName,
-			SentinelAddrs:    strings.Split(cfg.Address, ","),
-			Username:         cfg.Username,
-			Password:         cfg.Password,
-			DB:               cfg.DB,
-			SentinelUsername: cfg.SentinelUsername,
-			SentinelPassword: cfg.SentinelPassword,
-		}
+// 		redisClient = redis.NewClusterClient(redisOptions)
 
-		if cfg.UseTLS {
-			tlsConfig, err := cfg.TLSConfig()
-			if err != nil {
-				fmt.Println("failed to init redis tls config:", err)
-				os.Exit(1)
-			}
-			redisOptions.TLSConfig = tlsConfig
-		}
+// 	case "sentinel":
+// 		redisOptions := &redis.FailoverOptions{
+// 			MasterName:       cfg.MasterName,
+// 			SentinelAddrs:    strings.Split(cfg.Address, ","),
+// 			Username:         cfg.Username,
+// 			Password:         cfg.Password,
+// 			DB:               cfg.DB,
+// 			SentinelUsername: cfg.SentinelUsername,
+// 			SentinelPassword: cfg.SentinelPassword,
+// 		}
 
-		redisClient = redis.NewFailoverClient(redisOptions)
+// 		if cfg.UseTLS {
+// 			tlsConfig, err := cfg.TLSConfig()
+// 			if err != nil {
+// 				fmt.Println("failed to init redis tls config:", err)
+// 				os.Exit(1)
+// 			}
+// 			redisOptions.TLSConfig = tlsConfig
+// 		}
 
-	default:
-		fmt.Println("failed to init redis , redis type is illegal:", cfg.RedisType)
-		os.Exit(1)
-	}
+// 		redisClient = redis.NewFailoverClient(redisOptions)
 
-	err := redisClient.Ping(context.Background()).Err()
-	if err != nil {
-		fmt.Println("failed to ping redis:", err)
-		os.Exit(1)
-	}
-	return redisClient, nil
-}
+// 	default:
+// 		fmt.Println("failed to init redis , redis type is illegal:", cfg.RedisType)
+// 		os.Exit(1)
+// 	}
 
-// func MGet(ctx context.Context, r Redis, keys []string) ([][]byte, error) {
+// 	err := redisClient.Ping(context.Background()).Err()
+// 	if err != nil {
+// 		fmt.Println("failed to ping redis:", err)
+// 		os.Exit(1)
+// 	}
+// 	return redisClient, nil
+// }
+
+// func MGet(ctx context.Context, r Redis, keys []string) [][]byte {
 // 	var vals [][]byte
 // 	pipe := r.Pipeline()
 // 	for _, key := range keys {
 // 		pipe.Get(ctx, key)
 // 	}
-// 	cmds, err := pipe.Exec(ctx)
-// 	if err != nil {
-// 		logger.Errorf("failed to exec pipeline: %s", err)
-// 		return vals, err
-// 	}
+// 	cmds, _ := pipe.Exec(ctx)
 
 // 	for i, key := range keys {
 // 		cmd := cmds[i]
+// 		if errors.Is(cmd.Err(), redis.Nil) {
+// 			continue
+// 		}
+
 // 		if cmd.Err() != nil {
 // 			logger.Errorf("failed to get key: %s, err: %s", key, cmd.Err())
 // 			continue
@@ -137,7 +136,7 @@ func NewRedis(cfg RedisConfig) (Redis, error) {
 // 		vals = append(vals, val)
 // 	}
 
-// 	return vals, err
+// 	return vals
 // }
 
 // func MSet(ctx context.Context, r Redis, m map[string]interface{}) error {

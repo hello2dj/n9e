@@ -16,7 +16,7 @@ type DatasourceHashRingType struct {
 }
 
 // for alert_rule sharding
-var HostDatasource int64 = 100000
+var HostDatasource int64 = 99999999
 var DatasourceHashRing = DatasourceHashRingType{Rings: make(map[int64]*consistent.Consistent)}
 
 func NewConsistentHashRing(replicas int32, nodes []string) *consistent.Consistent {
@@ -40,8 +40,8 @@ func RebuildConsistentHashRing(datasourceId int64, nodes []string) {
 }
 
 func (chr *DatasourceHashRingType) GetNode(datasourceId int64, pk string) (string, error) {
-	chr.RLock()
-	defer chr.RUnlock()
+	chr.Lock()
+	defer chr.Unlock()
 	_, exists := chr.Rings[datasourceId]
 	if !exists {
 		chr.Rings[datasourceId] = NewConsistentHashRing(int32(NodeReplicas), []string{})
@@ -53,10 +53,8 @@ func (chr *DatasourceHashRingType) GetNode(datasourceId int64, pk string) (strin
 func (chr *DatasourceHashRingType) IsHit(datasourceId int64, pk string, currentNode string) bool {
 	node, err := chr.GetNode(datasourceId, pk)
 	if err != nil {
-		if errors.Is(err, consistent.ErrEmptyCircle) {
-			logger.Debugf("rule id:%s is not work, datasource id:%d is not assigned to active alert engine", pk, datasourceId)
-		} else {
-			logger.Debugf("rule id:%s is not work, datasource id:%d failed to get node from hashring:%v", pk, datasourceId, err)
+		if !errors.Is(err, consistent.ErrEmptyCircle) {
+			logger.Errorf("rule id:%s is not work, datasource id:%d failed to get node from hashring:%v", pk, datasourceId, err)
 		}
 		return false
 	}
@@ -64,7 +62,18 @@ func (chr *DatasourceHashRingType) IsHit(datasourceId int64, pk string, currentN
 }
 
 func (chr *DatasourceHashRingType) Set(datasourceId int64, r *consistent.Consistent) {
-	chr.RLock()
-	defer chr.RUnlock()
+	chr.Lock()
+	defer chr.Unlock()
 	chr.Rings[datasourceId] = r
+}
+
+func (chr *DatasourceHashRingType) Clear() {
+	chr.Lock()
+	defer chr.Unlock()
+	for id := range chr.Rings {
+		if id == HostDatasource {
+			continue
+		}
+		delete(chr.Rings, id)
+	}
 }

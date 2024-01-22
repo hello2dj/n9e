@@ -2,11 +2,10 @@ package aconf
 
 import (
 	"path"
-
-	"github.com/toolkits/pkg/runner"
 )
 
 type Alert struct {
+	Disable     bool
 	EngineDelay int64
 	Heartbeat   HeartbeatConfig
 	Alerting    Alerting
@@ -54,9 +53,9 @@ type Ibex struct {
 	Timeout       int64
 }
 
-func (a *Alert) PreCheck() {
+func (a *Alert) PreCheck(configDir string) {
 	if a.Alerting.TemplatesDir == "" {
-		a.Alerting.TemplatesDir = path.Join(runner.Cwd, "etc", "template")
+		a.Alerting.TemplatesDir = path.Join(configDir, "template")
 	}
 
 	if a.Alerting.NotifyConcurrency == 0 {
@@ -69,5 +68,9 @@ func (a *Alert) PreCheck() {
 
 	if a.Heartbeat.EngineName == "" {
 		a.Heartbeat.EngineName = "default"
+	}
+
+	if a.EngineDelay == 0 {
+		a.EngineDelay = 30
 	}
 }

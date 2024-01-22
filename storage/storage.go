@@ -1,7 +1,8 @@
 package storage
 
 import (
-	"cncamp/pkg/third_party/nightingale/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/pkg/ormx"
+
 	"gorm.io/gorm"
 )
 

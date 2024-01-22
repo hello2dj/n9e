@@ -3,7 +3,8 @@ package router
 import (
 	"net/http"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 )
@@ -68,6 +69,11 @@ func (rt *Router) alertAggrViewPut(c *gin.Context) {
 			return
 		}
 	}
-
-	ginx.NewRender(c).Message(view.Update(rt.Ctx, f.Name, f.Rule, f.Cate, me.Id))
+	view.Name = f.Name
+	view.Rule = f.Rule
+	view.Cate = f.Cate
+	if view.CreateBy == 0 {
+		view.CreateBy = me.Id
+	}
+	ginx.NewRender(c).Message(view.Update(rt.Ctx))
 }

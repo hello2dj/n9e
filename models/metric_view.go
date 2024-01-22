@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
 )
 
 // MetricView 在告警聚合视图查看的时候，要存储一些聚合规则
@@ -22,6 +22,10 @@ type MetricView struct {
 
 func (v *MetricView) TableName() string {
 	return "metric_view"
+}
+
+func (v *MetricView) DB2FE() error {
+	return nil
 }
 
 func (v *MetricView) Verify() error {

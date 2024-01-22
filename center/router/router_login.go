@@ -1,39 +1,62 @@
 package router
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/cas"
-	"cncamp/pkg/third_party/nightingale/pkg/ldapx"
-	"cncamp/pkg/third_party/nightingale/pkg/oauth2x"
-	"cncamp/pkg/third_party/nightingale/pkg/oidcx"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/cas"
+	"github.com/ccfos/nightingale/v6/pkg/ldapx"
+	"github.com/ccfos/nightingale/v6/pkg/oauth2x"
+	"github.com/ccfos/nightingale/v6/pkg/oidcx"
+	"github.com/ccfos/nightingale/v6/pkg/secu"
+	"github.com/pelletier/go-toml/v2"
+
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/toolkits/pkg/ginx"
 	"github.com/toolkits/pkg/logger"
 )
 
 type loginForm struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username    string `json:"username" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	Captchaid   string `json:"captchaid"`
+	Verifyvalue string `json:"verifyvalue"`
 }
 
 func (rt *Router) loginPost(c *gin.Context) {
 	var f loginForm
 	ginx.BindJSON(c, &f)
+	logger.Infof("username:%s login from:%s", f.Username, c.ClientIP())
 
-	user, err := models.PassLogin(rt.Ctx, f.Username, f.Password)
+	if rt.HTTP.ShowCaptcha.Enable {
+		if !CaptchaVerify(f.Captchaid, f.Verifyvalue) {
+			ginx.NewRender(c).Message("incorrect verification code")
+			return
+		}
+	}
+	authPassWord := f.Password
+	// need decode
+	if rt.HTTP.RSA.OpenRSA {
+		decPassWord, err := secu.Decrypt(f.Password, rt.HTTP.RSA.RSAPrivateKey, rt.HTTP.RSA.RSAPassWord)
+		if err != nil {
+			logger.Errorf("RSA Decrypt failed: %v username: %s", err, f.Username)
+			ginx.NewRender(c).Message(err)
+			return
+		}
+		authPassWord = decPassWord
+	}
+	user, err := models.PassLogin(rt.Ctx, f.Username, authPassWord)
 	if err != nil {
 		// pass validate fail, try ldap
 		if rt.Sso.LDAP.Enable {
 			roles := strings.Join(rt.Sso.LDAP.DefaultRoles, " ")
-			user, err = models.LdapLogin(rt.Ctx, f.Username, f.Password, roles, rt.Sso.LDAP)
+			user, err = models.LdapLogin(rt.Ctx, f.Username, authPassWord, roles, rt.Sso.LDAP)
 			if err != nil {
 				logger.Debugf("ldap login failed: %v username: %s", err, f.Username)
 				ginx.NewRender(c).Message(err)
@@ -66,6 +89,7 @@ func (rt *Router) loginPost(c *gin.Context) {
 }
 
 func (rt *Router) logoutPost(c *gin.Context) {
+	logger.Infof("username:%s login from:%s", c.GetString("username"), c.ClientIP())
 	metadata, err := rt.extractTokenMetadata(c.Request)
 	if err != nil {
 		ginx.NewRender(c, http.StatusBadRequest).Message("failed to parse jwt token")
@@ -206,7 +230,7 @@ func (rt *Router) loginCallback(c *gin.Context) {
 
 	ret, err := rt.Sso.OIDC.Callback(rt.Redis, c.Request.Context(), code, state)
 	if err != nil {
-		logger.Debugf("sso.callback() get ret %+v error %v", ret, err)
+		logger.Errorf("sso_callback fail. code:%s, state:%s, get ret: %+v. error: %v", code, state, ret, err)
 		ginx.NewRender(c).Data(CallbackOutput{}, err)
 		return
 	}
@@ -491,10 +515,23 @@ type SsoConfigOutput struct {
 }
 
 func (rt *Router) ssoConfigNameGet(c *gin.Context) {
+	var oidcDisplayName, casDisplayName, oauthDisplayName string
+	if rt.Sso.OIDC != nil {
+		oidcDisplayName = rt.Sso.OIDC.GetDisplayName()
+	}
+
+	if rt.Sso.CAS != nil {
+		casDisplayName = rt.Sso.CAS.GetDisplayName()
+	}
+
+	if rt.Sso.OAuth2 != nil {
+		oauthDisplayName = rt.Sso.OAuth2.GetDisplayName()
+	}
+
 	ginx.NewRender(c).Data(SsoConfigOutput{
-		OidcDisplayName:  rt.Sso.OIDC.GetDisplayName(),
-		CasDisplayName:   rt.Sso.CAS.GetDisplayName(),
-		OauthDisplayName: rt.Sso.OAuth2.GetDisplayName(),
+		OidcDisplayName:  oidcDisplayName,
+		CasDisplayName:   casDisplayName,
+		OauthDisplayName: oauthDisplayName,
 	}, nil)
 }
 
@@ -519,8 +556,7 @@ func (rt *Router) ssoConfigUpdate(c *gin.Context) {
 		var config oidcx.Config
 		err := toml.Unmarshal([]byte(f.Content), &config)
 		ginx.Dangerous(err)
-
-		err = rt.Sso.OIDC.Reload(config)
+		rt.Sso.OIDC, err = oidcx.New(config)
 		ginx.Dangerous(err)
 	case "CAS":
 		var config cas.Config
@@ -535,4 +571,20 @@ func (rt *Router) ssoConfigUpdate(c *gin.Context) {
 	}
 
 	ginx.NewRender(c).Message(nil)
+}
+
+type RSAConfigOutput struct {
+	OpenRSA      bool
+	RSAPublicKey string
+}
+
+func (rt *Router) rsaConfigGet(c *gin.Context) {
+	publicKey := ""
+	if len(rt.HTTP.RSA.RSAPublicKey) > 0 {
+		publicKey = base64.StdEncoding.EncodeToString(rt.HTTP.RSA.RSAPublicKey)
+	}
+	ginx.NewRender(c).Data(RSAConfigOutput{
+		OpenRSA:      rt.HTTP.RSA.OpenRSA,
+		RSAPublicKey: publicKey,
+	}, nil)
 }

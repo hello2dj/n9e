@@ -5,8 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/poster"
+	"github.com/ccfos/nightingale/v6/alert/astats"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+
 	"github.com/toolkits/pkg/logger"
 )
 
@@ -31,7 +33,7 @@ type DingtalkSender struct {
 }
 
 func (ds *DingtalkSender) Send(ctx MessageContext) {
-	if len(ctx.Users) == 0 || ctx.Rule == nil || ctx.Event == nil {
+	if len(ctx.Users) == 0 || len(ctx.Events) == 0 {
 		return
 	}
 
@@ -39,7 +41,7 @@ func (ds *DingtalkSender) Send(ctx MessageContext) {
 	if len(urls) == 0 {
 		return
 	}
-	message := BuildTplMessage(ds.tpl, ctx.Event)
+	message := BuildTplMessage(ds.tpl, ctx.Events)
 
 	for _, url := range urls {
 		var body dingtalk
@@ -48,7 +50,7 @@ func (ds *DingtalkSender) Send(ctx MessageContext) {
 			body = dingtalk{
 				Msgtype: "markdown",
 				Markdown: dingtalkMarkdown{
-					Title: ctx.Event.RuleName,
+					Title: ctx.Events[0].RuleName,
 					Text:  message,
 				},
 			}
@@ -56,7 +58,7 @@ func (ds *DingtalkSender) Send(ctx MessageContext) {
 			body = dingtalk{
 				Msgtype: "markdown",
 				Markdown: dingtalkMarkdown{
-					Title: ctx.Event.RuleName,
+					Title: ctx.Events[0].RuleName,
 					Text:  message + "\n" + strings.Join(ats, " "),
 				},
 				At: dingtalkAt{
@@ -65,7 +67,8 @@ func (ds *DingtalkSender) Send(ctx MessageContext) {
 				},
 			}
 		}
-		ds.doSend(url, body)
+
+		doSend(url, body, models.Dingtalk, ctx.Stats)
 	}
 }
 
@@ -80,7 +83,7 @@ func (ds *DingtalkSender) extract(users []*models.User) ([]string, []string) {
 		}
 		if token, has := user.ExtractToken(models.Dingtalk); has {
 			url := token
-			if !strings.HasPrefix(token, "https://") {
+			if !strings.HasPrefix(token, "https://") && !strings.HasPrefix(token, "http://") {
 				url = "https://oapi.dingtalk.com/robot/send?access_token=" + token
 			}
 			urls = append(urls, url)
@@ -89,11 +92,14 @@ func (ds *DingtalkSender) extract(users []*models.User) ([]string, []string) {
 	return urls, ats
 }
 
-func (ds *DingtalkSender) doSend(url string, body dingtalk) {
+func doSend(url string, body interface{}, channel string, stats *astats.Stats) {
+	stats.AlertNotifyTotal.WithLabelValues(channel).Inc()
+
 	res, code, err := poster.PostJSON(url, time.Second*5, body, 3)
 	if err != nil {
-		logger.Errorf("dingtalk_sender: result=fail url=%s code=%d error=%v response=%s", url, code, err, string(res))
+		logger.Errorf("%s_sender: result=fail url=%s code=%d error=%v response=%s", channel, url, code, err, string(res))
+		stats.AlertNotifyErrorTotal.WithLabelValues(channel).Inc()
 	} else {
-		logger.Infof("dingtalk_sender: result=succ url=%s code=%d response=%s", url, code, string(res))
+		logger.Infof("%s_sender: result=succ url=%s code=%d response=%s", channel, url, code, string(res))
 	}
 }

@@ -2,13 +2,16 @@ package router
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 	"github.com/toolkits/pkg/i18n"
+	"github.com/toolkits/pkg/str"
 )
 
 // Return all, front-end search and paging
@@ -25,8 +28,34 @@ func (rt *Router) alertRuleGets(c *gin.Context) {
 	ginx.NewRender(c).Data(ars, err)
 }
 
+func (rt *Router) alertRuleGetsByGids(c *gin.Context) {
+	gids := str.IdsInt64(ginx.QueryStr(c, "gids"), ",")
+	if len(gids) == 0 {
+		ginx.NewRender(c, http.StatusBadRequest).Message("arg(gids) is empty")
+		return
+	}
+	for _, gid := range gids {
+		rt.bgroCheck(c, gid)
+	}
+
+	ars, err := models.AlertRuleGetsByBGIds(rt.Ctx, gids)
+	if err == nil {
+		cache := make(map[int64]*models.UserGroup)
+		for i := 0; i < len(ars); i++ {
+			ars[i].FillNotifyGroups(rt.Ctx, cache)
+			ars[i].FillSeverities()
+		}
+	}
+	ginx.NewRender(c).Data(ars, err)
+}
+
 func (rt *Router) alertRulesGetByService(c *gin.Context) {
-	prods := strings.Split(ginx.QueryStr(c, "prods", ""), ",")
+	prods := []string{}
+	prodStr := ginx.QueryStr(c, "prods", "")
+	if prodStr != "" {
+		prods = strings.Split(ginx.QueryStr(c, "prods", ""), ",")
+	}
+
 	query := ginx.QueryStr(c, "query", "")
 	algorithm := ginx.QueryStr(c, "algorithm", "")
 	cluster := ginx.QueryStr(c, "cluster", "")
@@ -264,4 +293,55 @@ func (rt *Router) alertRuleGet(c *gin.Context) {
 	ginx.Dangerous(err)
 
 	ginx.NewRender(c).Data(ar, err)
+}
+
+// pre validation before save rule
+func (rt *Router) alertRuleValidation(c *gin.Context) {
+	var f models.AlertRule //new
+	ginx.BindJSON(c, &f)
+
+	if len(f.NotifyChannelsJSON) > 0 && len(f.NotifyGroupsJSON) > 0 { //Validation NotifyChannels
+		ngids := make([]int64, 0, len(f.NotifyChannelsJSON))
+		for i := range f.NotifyGroupsJSON {
+			id, _ := strconv.ParseInt(f.NotifyGroupsJSON[i], 10, 64)
+			ngids = append(ngids, id)
+		}
+		userGroups := rt.UserGroupCache.GetByUserGroupIds(ngids)
+		uids := make([]int64, 0)
+		for i := range userGroups {
+			uids = append(uids, userGroups[i].UserIds...)
+		}
+		users := rt.UserCache.GetByUserIds(uids)
+		//If any users have a certain notify channel's token, it will be okay. Otherwise, this notify channel is absent of tokens.
+		ancs := make([]string, 0, len(f.NotifyChannelsJSON)) //absent Notify Channels
+		for i := range f.NotifyChannelsJSON {
+			flag := true
+			//ignore non-default channels
+			switch f.NotifyChannelsJSON[i] {
+			case models.Dingtalk, models.Wecom, models.Feishu, models.Mm,
+				models.Telegram, models.Email, models.FeishuCard:
+				// do nothing
+			default:
+				continue
+			}
+			//default channels
+			for ui := range users {
+				if _, b := users[ui].ExtractToken(f.NotifyChannelsJSON[i]); b {
+					flag = false
+					break
+				}
+			}
+			if flag {
+				ancs = append(ancs, f.NotifyChannelsJSON[i])
+			}
+		}
+
+		if len(ancs) > 0 {
+			ginx.NewRender(c).Message("All users are missing notify channel configurations. Please check for missing tokens (each channel should be configured with at least one user). %s", ancs)
+			return
+		}
+
+	}
+
+	ginx.NewRender(c).Message("")
 }

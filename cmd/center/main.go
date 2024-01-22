@@ -8,9 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"cncamp/pkg/third_party/nightingale/center"
-	"cncamp/pkg/third_party/nightingale/pkg/osx"
-	"cncamp/pkg/third_party/nightingale/pkg/version"
+	"github.com/ccfos/nightingale/v6/center"
+	"github.com/ccfos/nightingale/v6/pkg/osx"
+	"github.com/ccfos/nightingale/v6/pkg/version"
+
+	"github.com/toolkits/pkg/net/tcpx"
 	"github.com/toolkits/pkg/runner"
 )
 
@@ -29,6 +31,8 @@ func main() {
 	}
 
 	printEnv()
+
+	tcpx.WaitHosts()
 
 	cleanFunc, err := center.Initialize(*configDir, *cryptoKey)
 	if err != nil {

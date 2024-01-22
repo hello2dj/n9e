@@ -2,11 +2,12 @@ before:
   hooks:
     # You may remove this if you don't use go modules.
     - go mod tidy
+    - go install github.com/rakyll/statik
 
 snapshot:
-  name_template: "{{ .Tag }}"
+  name_template: '{{ .Tag }}'
 checksum:
-  name_template: "checksums.txt"
+  name_template: 'checksums.txt'
 changelog:
   skip: true
 
@@ -14,7 +15,8 @@ builds:
   - id: build
     hooks:
       pre:
-        - ./fe.sh
+      - cmd: sh -x ./fe.sh
+        output: true
     main: ./cmd/center/
     binary: n9e
     env:
@@ -26,7 +28,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X cncamp/pkg/third_party/nightingale/pkg/version.Version={{ .Tag }}-{{.Commit}}
+      - -X github.com/ccfos/nightingale/v6/pkg/version.Version={{ .Tag }}-{{.Commit}}
   - id: build-cli
     main: ./cmd/cli/
     binary: n9e-cli
@@ -39,10 +41,10 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X cncamp/pkg/third_party/nightingale/pkg/version.Version={{ .Tag }}-{{.Commit}}
-  - id: build-alert
-    main: ./cmd/alert/
-    binary: n9e-alert
+      - -X github.com/ccfos/nightingale/v6/pkg/version.Version={{ .Tag }}-{{.Commit}}
+  - id: build-edge
+    main: ./cmd/edge/
+    binary: n9e-edge
     env:
       - CGO_ENABLED=0
     goos:
@@ -52,28 +54,14 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X cncamp/pkg/third_party/nightingale/pkg/version.Version={{ .Tag }}-{{.Commit}}
-  - id: build-pushgw
-    main: ./cmd/pushgw/
-    binary: n9e-pushgw
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
-      - -X cncamp/pkg/third_party/nightingale/pkg/version.Version={{ .Tag }}-{{.Commit}}
+      - -X github.com/ccfos/nightingale/v6/pkg/version.Version={{ .Tag }}-{{.Commit}}
 
 archives:
   - id: n9e
     builds:
       - build
       - build-cli
-      - build-alert
-      - build-pushgw
+      - build-edge
     format: tar.gz
     format_overrides:
       - goos: windows
@@ -83,7 +71,6 @@ archives:
     files:
       - docker/*
       - etc/*
-      - pub/*
       - integrations/*
       - cli/*
       - n9e.sql
@@ -103,7 +90,6 @@ dockers:
       - build
     dockerfile: docker/Dockerfile.goreleaser
     extra_files:
-      - pub
       - etc
       - integrations
     use: buildx
@@ -117,7 +103,6 @@ dockers:
       - build
     dockerfile: docker/Dockerfile.goreleaser.arm64
     extra_files:
-      - pub
       - etc
       - integrations
     use: buildx

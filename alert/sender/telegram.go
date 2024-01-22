@@ -3,16 +3,17 @@ package sender
 import (
 	"html/template"
 	"strings"
-	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/poster"
+	"github.com/ccfos/nightingale/v6/alert/astats"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/toolkits/pkg/logger"
 )
 
 type TelegramMessage struct {
 	Text   string
 	Tokens []string
+	Stats  *astats.Stats
 }
 
 type telegram struct {
@@ -25,15 +26,16 @@ type TelegramSender struct {
 }
 
 func (ts *TelegramSender) Send(ctx MessageContext) {
-	if len(ctx.Users) == 0 || ctx.Rule == nil || ctx.Event == nil {
+	if len(ctx.Users) == 0 || len(ctx.Events) == 0 {
 		return
 	}
 	tokens := ts.extract(ctx.Users)
-	message := BuildTplMessage(ts.tpl, ctx.Event)
+	message := BuildTplMessage(ts.tpl, ctx.Events)
 
 	SendTelegram(TelegramMessage{
 		Text:   message,
 		Tokens: tokens,
+		Stats:  ctx.Stats,
 	})
 }
 
@@ -54,7 +56,7 @@ func SendTelegram(message TelegramMessage) {
 			continue
 		}
 		var url string
-		if strings.HasPrefix(message.Tokens[i], "https://") {
+		if strings.HasPrefix(message.Tokens[i], "https://") || strings.HasPrefix(message.Tokens[i], "http://") {
 			url = message.Tokens[i]
 		} else {
 			array := strings.Split(message.Tokens[i], "/")
@@ -71,11 +73,6 @@ func SendTelegram(message TelegramMessage) {
 			Text:      message.Text,
 		}
 
-		res, code, err := poster.PostJSON(url, time.Second*5, body, 3)
-		if err != nil {
-			logger.Errorf("telegram_sender: result=fail url=%s code=%d error=%v response=%s", url, code, err, string(res))
-		} else {
-			logger.Infof("telegram_sender: result=succ url=%s code=%d response=%s", url, code, string(res))
-		}
+		doSend(url, body, models.Telegram, message.Stats)
 	}
 }

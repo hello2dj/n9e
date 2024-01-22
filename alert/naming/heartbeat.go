@@ -6,23 +6,23 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+
 	"github.com/toolkits/pkg/logger"
 )
 
 type Naming struct {
 	ctx             *ctx.Context
 	heartbeatConfig aconf.HeartbeatConfig
-	isCenter        bool
 }
 
-func NewNaming(ctx *ctx.Context, heartbeat aconf.HeartbeatConfig, isCenter bool) *Naming {
+func NewNaming(ctx *ctx.Context, heartbeat aconf.HeartbeatConfig) *Naming {
 	naming := &Naming{
 		ctx:             ctx,
 		heartbeatConfig: heartbeat,
-		isCenter:        isCenter,
 	}
 	naming.Heartbeats()
 	return naming
@@ -44,6 +44,10 @@ func (n *Naming) Heartbeats() error {
 }
 
 func (n *Naming) loopDeleteInactiveInstances() {
+	if !n.ctx.IsCenter {
+		return
+	}
+
 	interval := time.Duration(10) * time.Minute
 	for {
 		time.Sleep(interval)
@@ -92,6 +96,16 @@ func (n *Naming) heartbeat() error {
 		}
 	}
 
+	if len(datasourceIds) == 0 {
+		DatasourceHashRing.Clear()
+		for dsId := range localss {
+			if dsId == HostDatasource {
+				continue
+			}
+			delete(localss, dsId)
+		}
+	}
+
 	for i := 0; i < len(datasourceIds); i++ {
 		servers, err := n.ActiveServers(datasourceIds[i])
 		if err != nil {
@@ -111,7 +125,7 @@ func (n *Naming) heartbeat() error {
 		localss[datasourceIds[i]] = newss
 	}
 
-	if n.isCenter {
+	if n.ctx.IsCenter {
 		// 如果是中心节点，还需要处理 host 类型的告警规则，host 类型告警规则，和数据源无关，想复用下数据源的 hash ring，想用一个虚假的数据源 id 来处理
 		// if is center node, we need to handle host type alerting rules, host type alerting rules are not related to datasource, we want to reuse the hash ring of datasource, we want to use a fake datasource id to handle it
 		err := models.AlertingEngineHeartbeatWithCluster(n.ctx, n.heartbeatConfig.Endpoint, n.heartbeatConfig.EngineName, HostDatasource)
@@ -145,6 +159,21 @@ func (n *Naming) ActiveServers(datasourceId int64) ([]string, error) {
 		return nil, fmt.Errorf("cluster is empty")
 	}
 
+	if !n.ctx.IsCenter {
+		lst, err := poster.GetByUrls[[]string](n.ctx, "/v1/n9e/servers-active?dsid="+fmt.Sprintf("%d", datasourceId))
+		return lst, err
+	}
+
 	// 30秒内有心跳，就认为是活的
 	return models.AlertingEngineGetsInstances(n.ctx, "datasource_id = ? and clock > ?", datasourceId, time.Now().Unix()-30)
+}
+
+func (n *Naming) ActiveServersByEngineName() ([]string, error) {
+	if !n.ctx.IsCenter {
+		lst, err := poster.GetByUrls[[]string](n.ctx, "/v1/n9e/servers-active?engine_name="+n.heartbeatConfig.EngineName)
+		return lst, err
+	}
+
+	// 30秒内有心跳，就认为是活的
+	return models.AlertingEngineGetsInstances(n.ctx, "engine_cluster = ? and clock > ?", n.heartbeatConfig.EngineName, time.Now().Unix()-30)
 }

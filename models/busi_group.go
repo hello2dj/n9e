@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/poster"
+
 	"github.com/pkg/errors"
 	"gorm.io/gorm"
 )
@@ -12,7 +14,7 @@ import (
 type BusiGroup struct {
 	Id          int64                   `json:"id" gorm:"primaryKey"`
 	QyAppId     int64                   `json:"qy_app_id" gorm:"uniqueIndex:qy_app_id"`
-	Name        string                  `json:"name" gorm:"uniqueIndex:busi_group_name"`
+	Name        string                  `json:"name"`
 	LabelEnable int                     `json:"label_enable"`
 	LabelValue  string                  `json:"label_value"`
 	CreateAt    int64                   `json:"create_at"`
@@ -36,6 +38,10 @@ type UserGroupWithPermFlag struct {
 
 func (bg *BusiGroup) TableName() string {
 	return "busi_group"
+}
+
+func (bg *BusiGroup) DB2FE() error {
+	return nil
 }
 
 func (bg *BusiGroup) FillUserGroups(ctx *ctx.Context) error {
@@ -64,9 +70,17 @@ func (bg *BusiGroup) FillUserGroups(ctx *ctx.Context) error {
 
 func BusiGroupGetMap(ctx *ctx.Context) (map[int64]*BusiGroup, error) {
 	var lst []*BusiGroup
-	err := DB(ctx).Find(&lst).Error
-	if err != nil {
-		return nil, err
+	var err error
+	if !ctx.IsCenter {
+		lst, err = poster.GetByUrls[[]*BusiGroup](ctx, "/v1/n9e/busi-groups")
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		err = DB(ctx).Find(&lst).Error
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	ret := make(map[int64]*BusiGroup)
@@ -75,6 +89,12 @@ func BusiGroupGetMap(ctx *ctx.Context) (map[int64]*BusiGroup, error) {
 	}
 
 	return ret, nil
+}
+
+func BusiGroupGetAll(ctx *ctx.Context) ([]*BusiGroup, error) {
+	var lst []*BusiGroup
+	err := DB(ctx).Find(&lst).Error
+	return lst, err
 }
 
 func BusiGroupGet(ctx *ctx.Context, where string, args ...interface{}) (*BusiGroup, error) {
@@ -101,29 +121,49 @@ func BusiGroupExists(ctx *ctx.Context, where string, args ...interface{}) (bool,
 }
 
 func (bg *BusiGroup) Del(ctx *ctx.Context) error {
-	err := DB(ctx).Model(&AlertMute{}).Delete("group_id=?", bg.Id).Error
+	has, err := Exists(DB(ctx).Model(&AlertMute{}).Where("group_id=?", bg.Id))
 	if err != nil {
 		return err
 	}
 
-	err = DB(ctx).Model(&AlertSubscribe{}).Where("group_id=?", bg.Id).Error
+	if has {
+		return errors.New("Some alert mutes still in the BusiGroup")
+	}
+
+	has, err = Exists(DB(ctx).Model(&AlertSubscribe{}).Where("group_id=?", bg.Id))
 	if err != nil {
 		return err
 	}
 
-	err = DB(ctx).Model(&Target{}).Where("group_id=?", bg.Id).Error
+	if has {
+		return errors.New("Some alert subscribes still in the BusiGroup")
+	}
+
+	has, err = Exists(DB(ctx).Model(&Target{}).Where("group_id=?", bg.Id))
 	if err != nil {
 		return err
 	}
 
-	err = DB(ctx).Model(&Board{}).Where("group_id=?", bg.Id).Error
+	if has {
+		return errors.New("Some targets still in the BusiGroup")
+	}
+
+	has, err = Exists(DB(ctx).Model(&Board{}).Where("group_id=?", bg.Id))
 	if err != nil {
 		return err
 	}
 
-	err = DB(ctx).Model(&TaskTpl{}).Where("group_id=?", bg.Id).Error
+	if has {
+		return errors.New("Some dashboards still in the BusiGroup")
+	}
+
+	has, err = Exists(DB(ctx).Model(&TaskTpl{}).Where("group_id=?", bg.Id))
 	if err != nil {
 		return err
+	}
+
+	if has {
+		return errors.New("Some recovery scripts still in the BusiGroup")
 	}
 
 	// hasCR, err := Exists(DB(ctx).Table("collect_rule").Where("group_id=?", bg.Id))
@@ -135,9 +175,13 @@ func (bg *BusiGroup) Del(ctx *ctx.Context) error {
 	// 	return errors.New("Some collect rules still in the BusiGroup")
 	// }
 
-	err = DB(ctx).Model(&AlertRule{}).Where("group_id=?", bg.Id).Error
+	has, err = Exists(DB(ctx).Model(&AlertRule{}).Where("group_id=?", bg.Id))
 	if err != nil {
 		return err
+	}
+
+	if has {
+		return errors.New("Some alert rules still in the BusiGroup")
 	}
 
 	return DB(ctx).Transaction(func(tx *gorm.DB) error {
@@ -234,9 +278,7 @@ func (bg *BusiGroup) Update(ctx *ctx.Context, name string, labelEnable int, labe
 	}).Error
 }
 
-type BusiGroupUpdater = func(bg *BusiGroup)
-
-func BusiGroupAdd(ctx *ctx.Context, name string, labelEnable int, labelValue string, members []BusiGroupMember, creator string, updater ...BusiGroupUpdater) error {
+func BusiGroupAdd(ctx *ctx.Context, name string, labelEnable int, labelValue string, members []BusiGroupMember, creator string) error {
 	exists, err := BusiGroupExists(ctx, "name=?", name)
 	if err != nil {
 		return errors.WithMessage(err, "failed to count BusiGroup")
@@ -282,10 +324,6 @@ func BusiGroupAdd(ctx *ctx.Context, name string, labelEnable int, labelValue str
 		UpdateBy:    creator,
 	}
 
-	for _, u := range updater {
-		u(obj)
-	}
-
 	return DB(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(obj).Error; err != nil {
 			return err
@@ -306,6 +344,11 @@ func BusiGroupAdd(ctx *ctx.Context, name string, labelEnable int, labelValue str
 }
 
 func BusiGroupStatistics(ctx *ctx.Context) (*Statistics, error) {
+	if !ctx.IsCenter {
+		s, err := poster.GetByUrls[*Statistics](ctx, "/v1/n9e/statistic?name=busi_group")
+		return s, err
+	}
+
 	session := DB(ctx).Model(&BusiGroup{}).Select("count(*) as total", "max(update_at) as last_updated")
 
 	var stats []*Statistics

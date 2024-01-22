@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
@@ -126,7 +127,6 @@ func (rt *Router) jwtAuth() gin.HandlerFunc {
 
 		c.Set("userid", userid)
 		c.Set("username", username)
-
 		c.Next()
 	}
 }
@@ -145,7 +145,7 @@ func (rt *Router) handleJWTToken(c *gin.Context) (userid int64, username string,
 	// ${userid}-${username}
 	arr := strings.SplitN(userIdentity, "-", 2)
 	if len(arr) != 2 {
-		return 0, "", errors.New("unauthorized")
+		return 0, "", err
 	}
 
 	userid, err = strconv.ParseInt(arr[0], 10, 64)
@@ -156,7 +156,11 @@ func (rt *Router) handleJWTToken(c *gin.Context) (userid int64, username string,
 }
 
 func (rt *Router) auth() gin.HandlerFunc {
-	return rt.jwtAuth()
+	if rt.HTTP.ProxyAuth.Enable {
+		return rt.proxyAuth()
+	} else {
+		return rt.jwtAuth()
+	}
 }
 
 // if proxy auth is enabled, mock jwt login/logout/refresh request
@@ -217,19 +221,10 @@ func (rt *Router) userGroupWrite() gin.HandlerFunc {
 
 func (rt *Router) bgro() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var (
-			me  = c.MustGet("user").(*models.User)
-			bg  = BusiGroup(rt.Ctx, ginx.UrlParamInt64(c, "id"))
-			can bool
-			err error
-		)
+		me := c.MustGet("user").(*models.User)
+		bg := BusiGroup(rt.Ctx, ginx.UrlParamInt64(c, "id"))
 
-		if rt.BusiGroupChecker != nil {
-			can, err = rt.BusiGroupChecker(c, me, bg)
-		} else {
-			can, err = me.CanDoBusiGroup(rt.Ctx, bg)
-		}
-
+		can, err := me.CanDoBusiGroup(rt.Ctx, bg)
 		ginx.Dangerous(err)
 
 		if !can {
@@ -244,19 +239,10 @@ func (rt *Router) bgro() gin.HandlerFunc {
 // bgrw 逐步要被干掉，不安全
 func (rt *Router) bgrw() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var (
-			me  = c.MustGet("user").(*models.User)
-			bg  = BusiGroup(rt.Ctx, ginx.UrlParamInt64(c, "id"))
-			can bool
-			err error
-		)
+		me := c.MustGet("user").(*models.User)
+		bg := BusiGroup(rt.Ctx, ginx.UrlParamInt64(c, "id"))
 
-		if rt.BusiGroupChecker != nil {
-			can, err = rt.BusiGroupChecker(c, me, bg)
-		} else {
-			can, err = me.CanDoBusiGroup(rt.Ctx, bg, "rw")
-		}
-
+		can, err := me.CanDoBusiGroup(rt.Ctx, bg, "rw")
 		ginx.Dangerous(err)
 
 		if !can {
@@ -270,18 +256,10 @@ func (rt *Router) bgrw() gin.HandlerFunc {
 
 // bgrwCheck 要逐渐替换掉bgrw方法，更安全
 func (rt *Router) bgrwCheck(c *gin.Context, bgid int64) {
-	var (
-		me  = c.MustGet("user").(*models.User)
-		bg  = BusiGroup(rt.Ctx, bgid)
-		can bool
-		err error
-	)
+	me := c.MustGet("user").(*models.User)
+	bg := BusiGroup(rt.Ctx, bgid)
 
-	if rt.BusiGroupChecker != nil {
-		can, err = rt.BusiGroupChecker(c, me, bg)
-	} else {
-		can, err = me.CanDoBusiGroup(rt.Ctx, bg, "rw")
-	}
+	can, err := me.CanDoBusiGroup(rt.Ctx, bg, "rw")
 	ginx.Dangerous(err)
 
 	if !can {
@@ -321,16 +299,6 @@ func (rt *Router) bgroCheck(c *gin.Context, bgid int64) {
 func (rt *Router) perm(operation string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		me := c.MustGet("user").(*models.User)
-		can, ok := rt.handlePermCheck(c, me, operation)
-		if can {
-			c.Next()
-			return
-		}
-
-		if ok {
-			c.Next()
-			return
-		}
 
 		can, err := me.CheckPerm(rt.Ctx, operation)
 		ginx.Dangerous(err)
@@ -341,14 +309,6 @@ func (rt *Router) perm(operation string) gin.HandlerFunc {
 
 		c.Next()
 	}
-}
-
-func (rt *Router) handlePermCheck(c *gin.Context, me *models.User, operation string) (can bool, ok bool) {
-	if rt.CheckPerm == nil {
-		return false, false
-	}
-
-	return rt.CheckPerm(c, me, operation)
 }
 
 func (rt *Router) admin() gin.HandlerFunc {

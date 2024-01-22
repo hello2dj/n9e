@@ -4,26 +4,38 @@ import (
 	"net/http"
 	"strings"
 
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ormx"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ormx"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 )
 
+func (rt *Router) userBusiGroupsGets(c *gin.Context) {
+	userid := ginx.QueryInt64(c, "userid", 0)
+	username := ginx.QueryStr(c, "username", "")
+
+	if userid == 0 && username == "" {
+		ginx.Bomb(http.StatusBadRequest, "userid or username required")
+	}
+
+	var user *models.User
+	var err error
+	if userid > 0 {
+		user, err = models.UserGetById(rt.Ctx, userid)
+	} else {
+		user, err = models.UserGetByUsername(rt.Ctx, username)
+	}
+
+	ginx.Dangerous(err)
+
+	groups, err := user.BusiGroups(rt.Ctx, 10000, "")
+	ginx.NewRender(c).Data(groups, err)
+}
+
 func (rt *Router) userFindAll(c *gin.Context) {
-	limit := ginx.QueryInt(c, "limit", 20)
-	query := ginx.QueryStr(c, "query", "")
-
-	total, err := models.UserTotal(rt.Ctx, query)
-	ginx.Dangerous(err)
-
-	list, err := models.UserGets(rt.Ctx, query, limit, ginx.Offset(c, limit))
-	ginx.Dangerous(err)
-
-	ginx.NewRender(c).Data(gin.H{
-		"list":  list,
-		"total": total,
-	}, nil)
+	list, err := models.UserGetAll(rt.Ctx)
+	ginx.NewRender(c).Data(list, err)
 }
 
 func (rt *Router) userGets(c *gin.Context) {

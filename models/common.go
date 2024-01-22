@@ -1,7 +1,8 @@
 package models
 
 import (
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+
 	"github.com/toolkits/pkg/str"
 	"gorm.io/gorm"
 )
@@ -32,7 +33,7 @@ func Insert(ctx *ctx.Context, obj interface{}) error {
 
 // CryptoPass crypto password use salt
 func CryptoPass(ctx *ctx.Context, raw string) (string, error) {
-	salt, err := ConfigsGet(ctx, "salt")
+	salt, err := ConfigsGet(ctx, SALT)
 	if err != nil {
 		return "", err
 	}
@@ -43,6 +44,18 @@ func CryptoPass(ctx *ctx.Context, raw string) (string, error) {
 type Statistics struct {
 	Total       int64 `gorm:"total"`
 	LastUpdated int64 `gorm:"last_updated"`
+}
+
+func StatisticsGet[T any](ctx *ctx.Context, model T) (*Statistics, error) {
+	var stats []*Statistics
+	session := DB(ctx).Model(model).Select("count(*) as total", "max(update_at) as last_updated")
+
+	err := session.Find(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return stats[0], nil
 }
 
 func MatchDatasource(ids []int64, id int64) bool {

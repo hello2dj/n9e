@@ -3,7 +3,8 @@ package router
 import (
 	"encoding/json"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 )
@@ -60,4 +61,9 @@ func (rt *Router) contactKeysGets(c *gin.Context) {
 	}
 
 	ginx.NewRender(c).Data(labelAndKeys, nil)
+}
+
+func (rt *Router) siteInfo(c *gin.Context) {
+	config, err := models.ConfigsGet(rt.Ctx, "site_info")
+	ginx.NewRender(c).Data(config, err)
 }

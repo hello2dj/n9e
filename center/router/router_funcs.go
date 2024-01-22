@@ -6,15 +6,53 @@ import (
 	"strconv"
 	"strings"
 
-	"cncamp/pkg/third_party/nightingale/alert/aconf"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/ibex"
+	"github.com/ccfos/nightingale/v6/alert/aconf"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ibex"
 	"github.com/gin-gonic/gin"
+
 	"github.com/toolkits/pkg/ginx"
 )
 
 const defaultLimit = 300
+
+func (rt *Router) statistic(c *gin.Context) {
+	name := ginx.QueryStr(c, "name")
+	var model interface{}
+	var err error
+	var statistics *models.Statistics
+	switch name {
+	case "alert_rule":
+		model = models.AlertRule{}
+	case "alert_subscribe":
+		model = models.AlertSubscribe{}
+	case "busi_group":
+		model = models.BusiGroup{}
+	case "recording_rule":
+		model = models.RecordingRule{}
+	case "target":
+		model = models.Target{}
+	case "user":
+		model = models.User{}
+	case "user_group":
+		model = models.UserGroup{}
+	case "datasource":
+		// datasource update_at is different from others
+		statistics, err = models.DatasourceStatistics(rt.Ctx)
+		ginx.NewRender(c).Data(statistics, err)
+		return
+	case "user_variable":
+		statistics, err = models.ConfigsUserVariableStatistics(rt.Ctx)
+		ginx.NewRender(c).Data(statistics, err)
+		return
+	default:
+		ginx.Bomb(http.StatusBadRequest, "invalid name")
+	}
+
+	statistics, err = models.StatisticsGet(rt.Ctx, model)
+	ginx.NewRender(c).Data(statistics, err)
+}
 
 func queryDatasourceIds(c *gin.Context) []int64 {
 	datasourceIds := ginx.QueryStr(c, "datasource_ids", "")

@@ -3,7 +3,7 @@ package process
 import (
 	"sync"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
 )
 
 type AlertCurEventMap struct {

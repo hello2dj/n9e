@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"cncamp/pkg/third_party/nightingale/conf"
-	"cncamp/pkg/third_party/nightingale/memsto"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/httpx"
-	"cncamp/pkg/third_party/nightingale/pkg/logx"
-	"cncamp/pkg/third_party/nightingale/pushgw/idents"
-	"cncamp/pkg/third_party/nightingale/pushgw/router"
-	"cncamp/pkg/third_party/nightingale/pushgw/writer"
-	"cncamp/pkg/third_party/nightingale/storage"
+	"github.com/ccfos/nightingale/v6/conf"
+	"github.com/ccfos/nightingale/v6/memsto"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/httpx"
+	"github.com/ccfos/nightingale/v6/pkg/logx"
+	"github.com/ccfos/nightingale/v6/pushgw/idents"
+	"github.com/ccfos/nightingale/v6/pushgw/router"
+	"github.com/ccfos/nightingale/v6/pushgw/writer"
 )
 
 type PushgwProvider struct {
@@ -31,13 +30,9 @@ func Initialize(configDir string, cryptoKey string) (func(), error) {
 		return nil, err
 	}
 
-	db, err := storage.New(config.DB)
-	if err != nil {
-		return nil, err
-	}
-	ctx := ctx.NewContext(context.Background(), db)
+	ctx := ctx.NewContext(context.Background(), nil, false, config.CenterApi)
 
-	idents := idents.New(db)
+	idents := idents.New(ctx)
 
 	stats := memsto.NewSyncStats()
 

@@ -2,11 +2,14 @@ package oidcx
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/storage"
+	"github.com/ccfos/nightingale/v6/storage"
+
 	oidc "github.com/coreos/go-oidc"
 	"github.com/google/uuid"
 	"github.com/toolkits/pkg/logger"
@@ -29,6 +32,7 @@ type SsoClient struct {
 	}
 	DefaultRoles []string
 
+	Ctx context.Context
 	sync.RWMutex
 }
 
@@ -40,6 +44,7 @@ type Config struct {
 	ClientId        string
 	ClientSecret    string
 	CoverAttributes bool
+	SkipTlsVerify   bool
 	Attributes      struct {
 		Nickname string
 		Username string
@@ -80,7 +85,19 @@ func (s *SsoClient) Reload(cf Config) error {
 	s.Attributes.Email = cf.Attributes.Email
 	s.DisplayName = cf.DisplayName
 	s.DefaultRoles = cf.DefaultRoles
-	provider, err := oidc.NewProvider(context.Background(), cf.SsoAddr)
+	s.Ctx = context.Background()
+
+	if cf.SkipTlsVerify {
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+
+		// Create an HTTP client that uses our custom transport
+		client := &http.Client{Transport: transport}
+		s.Ctx = context.WithValue(s.Ctx, oauth2.HTTPClient, client)
+	}
+
+	provider, err := oidc.NewProvider(s.Ctx, cf.SsoAddr)
 	if err != nil {
 		return err
 	}
@@ -141,17 +158,17 @@ func deleteRedirect(redis storage.Redis, ctx context.Context, state string) erro
 func (s *SsoClient) Callback(redis storage.Redis, ctx context.Context, code, state string) (*CallbackOutput, error) {
 	ret, err := s.exchangeUser(code)
 	if err != nil {
-		return nil, fmt.Errorf("ilegal user:%v", err)
+		return nil, fmt.Errorf("sso_exchange_user fail. code:%s, error:%v", code, err)
 	}
 
 	ret.Redirect, err = fetchRedirect(redis, ctx, state)
 	if err != nil {
-		logger.Debugf("get redirect err:%v code:%s state:%s", code, state, err)
+		logger.Errorf("get redirect err:%v code:%s state:%s", code, state, err)
 	}
 
 	err = deleteRedirect(redis, ctx, state)
 	if err != nil {
-		logger.Debugf("delete redirect err:%v code:%s state:%s", code, state, err)
+		logger.Errorf("delete redirect err:%v code:%s state:%s", code, state, err)
 	}
 	return ret, nil
 }
@@ -170,25 +187,36 @@ func (s *SsoClient) exchangeUser(code string) (*CallbackOutput, error) {
 	s.RLock()
 	defer s.RUnlock()
 
-	ctx := context.Background()
-	oauth2Token, err := s.Config.Exchange(ctx, code)
+	oauth2Token, err := s.Config.Exchange(s.Ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %v", err)
 	}
 
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
-		return nil, fmt.Errorf("no id_token field in oauth2 token. ")
+		rerr := fmt.Errorf("sso_exchange_user: no id_token field in oauth2 token %v", oauth2Token)
+		logger.Error(rerr)
+		return nil, rerr
 	}
 
-	idToken, err := s.Verifier.Verify(ctx, rawIDToken)
+	idToken, err := s.Verifier.Verify(s.Ctx, rawIDToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to verify ID Token: %v", err)
+		rerr := fmt.Errorf("sso_exchange_user: failed to verify id_token: %s, error:%v", rawIDToken, err)
+		logger.Error(rerr)
+		return nil, rerr
 	}
+
+	logger.Infof("sso_exchange_user: verify id_token success. token:%s", rawIDToken)
 
 	data := map[string]interface{}{}
 	if err := idToken.Claims(&data); err != nil {
-		return nil, err
+		rerr := fmt.Errorf("sso_exchange_user: failed to parse id_token: %s, error:%+v", rawIDToken, err)
+		logger.Error(rerr)
+		return nil, rerr
+	}
+
+	for k, v := range data {
+		logger.Debugf("sso_exchange_user: oidc info key:%s value:%v", k, v)
 	}
 
 	v := func(k string) string {

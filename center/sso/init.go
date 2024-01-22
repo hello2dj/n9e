@@ -3,14 +3,15 @@ package sso
 import (
 	"log"
 
-	"cncamp/pkg/third_party/nightingale/center/cconf"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/cas"
-	"cncamp/pkg/third_party/nightingale/pkg/ctx"
-	"cncamp/pkg/third_party/nightingale/pkg/ldapx"
-	"cncamp/pkg/third_party/nightingale/pkg/oauth2x"
-	"cncamp/pkg/third_party/nightingale/pkg/oidcx"
 	"github.com/BurntSushi/toml"
+	"github.com/ccfos/nightingale/v6/center/cconf"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/cas"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/ccfos/nightingale/v6/pkg/ldapx"
+	"github.com/ccfos/nightingale/v6/pkg/oauth2x"
+	"github.com/ccfos/nightingale/v6/pkg/oidcx"
+
 	"github.com/toolkits/pkg/logger"
 )
 
@@ -28,6 +29,8 @@ Port = 389
 BaseDn = 'dc=example,dc=org'
 BindUser = 'cn=manager,dc=example,dc=org'
 BindPass = '*******'
+# openldap format e.g. (&(uid=%s))
+# AD format e.g. (&(sAMAccountName=%s))
 AuthFilter = '(&(uid=%s))'
 CoverAttributes = true
 TLS = false
@@ -66,6 +69,7 @@ Email = 'email'
 const CAS = `
 Enable = false
 SsoAddr = 'https://cas.example.com/cas/'
+# LoginPath = ''
 RedirectURL = 'http://127.0.0.1:18000/callback/cas'
 DisplayName = 'CAS登录'
 CoverAttributes = false

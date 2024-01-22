@@ -1,7 +1,8 @@
 package router
 
 import (
-	"cncamp/pkg/third_party/nightingale/pkg/secu"
+	"github.com/ccfos/nightingale/v6/pkg/secu"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
 )

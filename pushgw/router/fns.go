@@ -1,9 +1,10 @@
 package router
 
 import (
-	"cncamp/pkg/third_party/nightingale/memsto"
-	"cncamp/pkg/third_party/nightingale/models"
-	"cncamp/pkg/third_party/nightingale/pkg/prompb"
+	"github.com/ccfos/nightingale/v6/memsto"
+	"github.com/ccfos/nightingale/v6/models"
+
+	"github.com/prometheus/prometheus/prompb"
 	"github.com/toolkits/pkg/logger"
 )
 
@@ -26,7 +27,7 @@ func (rt *Router) AppendLabels(pt *prompb.TimeSeries, target *models.Target, bgC
 			continue
 		}
 
-		pt.Labels = append(pt.Labels, &prompb.Label{
+		pt.Labels = append(pt.Labels, prompb.Label{
 			Name:  key,
 			Value: value,
 		})
@@ -56,7 +57,7 @@ func (rt *Router) AppendLabels(pt *prompb.TimeSeries, target *models.Target, bgC
 			return
 		}
 
-		pt.Labels = append(pt.Labels, &prompb.Label{
+		pt.Labels = append(pt.Labels, prompb.Label{
 			Name:  rt.Pushgw.BusiGroupLabelKey,
 			Value: bg.LabelValue,
 		})
@@ -94,4 +95,29 @@ func (rt *Router) debugSample(remoteAddr string, v *prompb.TimeSeries) {
 	}
 
 	logger.Debugf("--> debug sample from: %s, sample: %s", remoteAddr, v.String())
+}
+
+func (rt *Router) ForwardByIdent(clientIP string, ident string, v *prompb.TimeSeries) {
+	rt.BeforePush(clientIP, v)
+	if v == nil {
+		return
+	}
+	rt.Writers.PushSample(ident, *v)
+}
+
+func (rt *Router) ForwardByMetric(clientIP string, metric string, v *prompb.TimeSeries) {
+	rt.BeforePush(clientIP, v)
+
+	var hashkey string
+	if len(metric) >= 2 {
+		hashkey = metric[0:2]
+	} else {
+		hashkey = metric[0:1]
+	}
+	rt.Writers.PushSample(hashkey, *v)
+}
+
+func (rt *Router) BeforePush(clientIP string, v *prompb.TimeSeries) {
+	rt.HandleTS(v)
+	rt.debugSample(clientIP, v)
 }

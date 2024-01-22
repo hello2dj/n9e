@@ -3,7 +3,7 @@ package dispatch
 import (
 	"strconv"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
 )
 
 // NotifyTarget 维护所有需要发送的目标 用户-通道/回调/钩子信息,用map维护的数据结构具有去重功能

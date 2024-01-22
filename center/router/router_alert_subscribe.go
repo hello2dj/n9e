@@ -4,30 +4,56 @@ import (
 	"net/http"
 	"time"
 
-	"cncamp/pkg/third_party/nightingale/models"
+	"github.com/ccfos/nightingale/v6/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/ginx"
+	"github.com/toolkits/pkg/str"
 )
 
 // Return all, front-end search and paging
 func (rt *Router) alertSubscribeGets(c *gin.Context) {
 	bgid := ginx.UrlParamInt64(c, "id")
 	lst, err := models.AlertSubscribeGets(rt.Ctx, bgid)
-	if err == nil {
-		ugcache := make(map[int64]*models.UserGroup)
-		for i := 0; i < len(lst); i++ {
-			ginx.Dangerous(lst[i].FillUserGroups(rt.Ctx, ugcache))
-		}
+	ginx.Dangerous(err)
 
-		rulecache := make(map[int64]string)
-		for i := 0; i < len(lst); i++ {
-			ginx.Dangerous(lst[i].FillRuleName(rt.Ctx, rulecache))
-		}
+	ugcache := make(map[int64]*models.UserGroup)
+	rulecache := make(map[int64]string)
 
-		for i := 0; i < len(lst); i++ {
-			ginx.Dangerous(lst[i].FillDatasourceIds(rt.Ctx))
-		}
+	for i := 0; i < len(lst); i++ {
+		ginx.Dangerous(lst[i].FillUserGroups(rt.Ctx, ugcache))
+		ginx.Dangerous(lst[i].FillRuleName(rt.Ctx, rulecache))
+		ginx.Dangerous(lst[i].FillDatasourceIds(rt.Ctx))
+		ginx.Dangerous(lst[i].DB2FE())
 	}
+
+	ginx.NewRender(c).Data(lst, err)
+}
+
+func (rt *Router) alertSubscribeGetsByGids(c *gin.Context) {
+	gids := str.IdsInt64(ginx.QueryStr(c, "gids"), ",")
+	if len(gids) == 0 {
+		ginx.NewRender(c, http.StatusBadRequest).Message("arg(gids) is empty")
+		return
+	}
+
+	for _, gid := range gids {
+		rt.bgroCheck(c, gid)
+	}
+
+	lst, err := models.AlertSubscribeGetsByBGIds(rt.Ctx, gids)
+	ginx.Dangerous(err)
+
+	ugcache := make(map[int64]*models.UserGroup)
+	rulecache := make(map[int64]string)
+
+	for i := 0; i < len(lst); i++ {
+		ginx.Dangerous(lst[i].FillUserGroups(rt.Ctx, ugcache))
+		ginx.Dangerous(lst[i].FillRuleName(rt.Ctx, rulecache))
+		ginx.Dangerous(lst[i].FillDatasourceIds(rt.Ctx))
+		ginx.Dangerous(lst[i].DB2FE())
+	}
+
 	ginx.NewRender(c).Data(lst, err)
 }
 
@@ -82,6 +108,9 @@ func (rt *Router) alertSubscribePut(c *gin.Context) {
 			rt.Ctx,
 			"name",
 			"disabled",
+			"prod",
+			"cate",
+			"datasource_ids",
 			"cluster",
 			"rule_id",
 			"tags",
@@ -95,7 +124,10 @@ func (rt *Router) alertSubscribePut(c *gin.Context) {
 			"webhooks",
 			"for_duration",
 			"redefine_webhooks",
-			"datasource_ids",
+			"severities",
+			"extra_config",
+			"busi_groups",
+			"note",
 		))
 	}
 
@@ -108,4 +140,9 @@ func (rt *Router) alertSubscribeDel(c *gin.Context) {
 	f.Verify()
 
 	ginx.NewRender(c).Message(models.AlertSubscribeDel(rt.Ctx, f.Ids))
+}
+
+func (rt *Router) alertSubscribeGetsByService(c *gin.Context) {
+	lst, err := models.AlertSubscribeGetsByService(rt.Ctx)
+	ginx.NewRender(c).Data(lst, err)
 }
